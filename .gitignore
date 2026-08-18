@@ -1,0 +1,8 @@
+annotator/data/
+__pycache__/
+*.pyc
+.venv/
+.env
+*.db
+settings.json
+.DS_Store

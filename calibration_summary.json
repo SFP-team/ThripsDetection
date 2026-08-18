@@ -1,0 +1,153 @@
+{
+  "always_mean": {
+    "pearson": NaN,
+    "spearman": NaN,
+    "mae": 0.815,
+    "mae_rounded": 0.806,
+    "exact": 12,
+    "off_by_1": 31,
+    "qwk": 0.0
+  },
+  "uncalibrated_map": {
+    "pearson": 0.156,
+    "spearman": 0.208,
+    "mae": 1.019,
+    "mae_rounded": 1.0,
+    "exact": 10,
+    "off_by_1": 28,
+    "qwk": 0.047
+  },
+  "linear_map_insample": {
+    "pearson": 0.156,
+    "spearman": 0.208,
+    "mae": 0.83,
+    "mae_rounded": 0.806,
+    "exact": 12,
+    "off_by_1": 31,
+    "qwk": 0.0
+  },
+  "linear_map_loocv": {
+    "pearson": -0.186,
+    "spearman": -0.175,
+    "mae": 0.881,
+    "mae_rounded": 0.833,
+    "exact": 11,
+    "off_by_1": 31,
+    "qwk": -0.001
+  },
+  "isotonic_map_insample": {
+    "pearson": 0.399,
+    "spearman": 0.356,
+    "mae": 0.787,
+    "mae_rounded": 0.722,
+    "exact": 15,
+    "off_by_1": 31,
+    "qwk": 0.224
+  },
+  "isotonic_map_loocv": {
+    "pearson": 0.075,
+    "spearman": -0.196,
+    "mae": 0.933,
+    "mae_rounded": 0.917,
+    "exact": 10,
+    "off_by_1": 30,
+    "qwk": 0.007
+  },
+  "linear_off_loocv": {
+    "pearson": 0.051,
+    "spearman": 0.171,
+    "mae": 0.865,
+    "mae_rounded": 0.889,
+    "exact": 11,
+    "off_by_1": 29,
+    "qwk": -0.097
+  },
+  "linear_off_dark_loocv": {
+    "pearson": 0.023,
+    "spearman": 0.069,
+    "mae": 0.902,
+    "mae_rounded": 0.917,
+    "exact": 10,
+    "off_by_1": 29,
+    "qwk": -0.044
+  },
+  "linear_off_dark_cr_loocv": {
+    "pearson": 0.004,
+    "spearman": 0.032,
+    "mae": 0.924,
+    "mae_rounded": 0.889,
+    "exact": 11,
+    "off_by_1": 29,
+    "qwk": 0.001
+  },
+  "linear_birefnet_off_dark_loocv": {
+    "pearson": -0.12,
+    "spearman": -0.102,
+    "mae": 0.892,
+    "mae_rounded": 0.861,
+    "exact": 11,
+    "off_by_1": 30,
+    "qwk": -0.049
+  },
+  "linear_off_dark_sharp_loocv": {
+    "pearson": -0.075,
+    "spearman": -0.037,
+    "mae": 0.938,
+    "mae_rounded": 0.917,
+    "exact": 10,
+    "off_by_1": 29,
+    "qwk": -0.044
+  },
+  "linear_off_dark_tiles_loocv": {
+    "pearson": -0.033,
+    "spearman": 0.033,
+    "mae": 0.937,
+    "mae_rounded": 0.917,
+    "exact": 10,
+    "off_by_1": 29,
+    "qwk": -0.042
+  },
+  "linear_off_dark_insample": {
+    "pearson": 0.273,
+    "spearman": 0.265,
+    "mae": 0.824,
+    "mae_rounded": 0.833,
+    "exact": 11,
+    "off_by_1": 31,
+    "qwk": 0.049
+  },
+  "_notes": {
+    "human_mean": 2.972,
+    "linear_map_coef": [
+      2.4158,
+      0.2293
+    ],
+    "linear_off_dark_coef": [
+      1.5241,
+      2.897,
+      35.8743
+    ],
+    "formula_off_dark": "clip(1..5, 1.524 + 2.897*offgreen + 35.874*darkspot)",
+    "mean_pred_by_human_loocv_off_dark": [
+      2.96,
+      3.0,
+      2.96,
+      3.0,
+      3.02
+    ],
+    "mean_pred_by_human_uncalibrated": [
+      2.11,
+      2.38,
+      2.39,
+      2.59,
+      2.5
+    ],
+    "mean_pred_by_human_isotonic_loocv": [
+      2.84,
+      2.95,
+      3.03,
+      3.02,
+      2.97
+    ]
+  }
+}

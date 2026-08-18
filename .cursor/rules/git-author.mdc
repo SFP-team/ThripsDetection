@@ -1,0 +1,13 @@
+---
+description: Git commits use only the user's name — never Cursor as author or co-author
+alwaysApply: true
+---
+
+# Git author
+
+When creating or amending commits in this repo:
+
+- Use only the existing git user (`user.name` / `user.email`). Do not change git config.
+- Never add `Co-authored-by: Cursor`, `Co-authored-by: Cursor Agent`, or any `cursoragent@cursor.com` trailer.
+- Never set the author or committer to Cursor Agent.
+- Leave the commit message as the user's work only.
