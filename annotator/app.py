@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 import io
 import json
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -13,10 +12,11 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field
 
-from annotator.config import DATA, ROOT, load_settings, public_settings, save_settings
+from annotator.config import DATA, ROOT, load_settings, public_settings
 from annotator.db import (
     add_label,
     export_rows,
+    find_ready_batch,
     get_batch,
     get_tile,
     init_db,
@@ -28,13 +28,21 @@ from annotator.db import (
     set_batch_annotator,
     undo_label,
 )
-from annotator.pipeline import get_job, start_import, start_prepare
+from annotator.pipeline import get_job, start_import
+from annotator.sessions import (
+    ensure_legacy_sessions,
+    list_sessions,
+    session_export_folder,
+    start_session_from_dir,
+    start_session_from_upload,
+)
 
 STATIC = ROOT / "static"
-EXPORTS = DATA / "exports"
 
 app = FastAPI(title="Lab tile annotator")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+KIT_ONLY = "This copy only labels tiles already in the folder."
 
 
 class SettingsIn(BaseModel):
@@ -84,33 +92,44 @@ class AnnotatorIn(BaseModel):
     annotator: str = Field(min_length=1)
 
 
+class SessionPathIn(BaseModel):
+    annotator: str = Field(min_length=1)
+    name: str = ""
+    path: str = Field(min_length=1)
+
+
 @app.on_event("startup")
 def startup() -> None:
     init_db()
     DATA.mkdir(parents=True, exist_ok=True)
+    ensure_legacy_sessions()
+
+
+def _index() -> FileResponse:
+    return FileResponse(STATIC / "index.html")
 
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(STATIC / "index.html")
+    return _index()
+
+
+@app.get("/batches/{batch_id}/label")
+@app.get("/batches/{batch_id}/review")
+def spa_batch(batch_id: int) -> FileResponse:
+    return _index()
 
 
 @app.get("/api/settings")
 def api_settings() -> dict[str, Any]:
-    return public_settings(load_settings())
+    payload = public_settings(load_settings())
+    payload["ready_batch_id"] = find_ready_batch()
+    return payload
 
 
 @app.post("/api/settings")
 def api_save_settings(body: SettingsIn) -> dict[str, Any]:
-    settings = load_settings()
-    for key, value in body.model_dump(exclude_unset=True).items():
-        if value is None:
-            continue
-        if key == "ssh_password" and value == "":
-            continue
-        setattr(settings, key, value)
-    save_settings(settings)
-    return public_settings(settings)
+    return public_settings(load_settings())
 
 
 @app.get("/api/batches")
@@ -134,21 +153,58 @@ def api_batch_annotator(batch_id: int, body: AnnotatorIn) -> dict[str, Any]:
     return get_batch(batch_id)
 
 
+@app.get("/api/sessions")
+def api_sessions() -> list[dict[str, Any]]:
+    return list_sessions()
+
+
+@app.post("/api/sessions/from-path")
+def api_session_from_path(body: SessionPathIn) -> dict[str, Any]:
+    try:
+        return start_session_from_dir(body.annotator, body.name, Path(body.path))
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/sessions/upload")
+async def api_session_upload(
+    annotator: str = Form(...),
+    name: str = Form(""),
+    files: list[UploadFile] = File(...),
+    relpaths: list[str] | None = Form(None),
+) -> dict[str, Any]:
+    paths = relpaths if isinstance(relpaths, list) else ([relpaths] if relpaths else [])
+    payload: list[tuple[str, bytes]] = []
+    for index, upload in enumerate(files):
+        filename = Path(upload.filename or "").name
+        if not filename:
+            continue
+        rel = paths[index] if index < len(paths) else filename
+        payload.append((rel, await upload.read()))
+    if not payload:
+        raise HTTPException(400, "Choose a folder of tiles.")
+    try:
+        return start_session_from_upload(annotator, name, payload)
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.post("/api/import")
 def api_import(body: ImportIn) -> dict[str, Any]:
-    return start_import(
-        annotator=body.annotator,
-        name=body.name,
-        local_path=body.path,
-        use_remote=body.remote and not body.path,
-    )
+    try:
+        return start_import(
+            annotator=body.annotator,
+            name=body.name,
+            local_path=body.path,
+            use_remote=False,
+        )
+    except (FileNotFoundError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.post("/api/prepare")
 def api_prepare(body: PrepareIn) -> dict[str, Any]:
-    if not body.path:
-        raise HTTPException(400, "Folder path is required")
-    return start_prepare(annotator=body.annotator, name=body.name, folder=body.path)
+    raise HTTPException(400, KIT_ONLY)
 
 
 @app.post("/api/prepare/upload")
@@ -157,21 +213,7 @@ async def api_prepare_upload(
     name: str = Form(""),
     files: list[UploadFile] = File(...),
 ) -> dict[str, Any]:
-    inbox = DATA / "inbox" / f"upload_{annotator}"
-    if inbox.exists():
-        shutil.rmtree(inbox)
-    inbox.mkdir(parents=True)
-    saved = 0
-    for upload in files:
-        filename = Path(upload.filename or "").name
-        if not filename or Path(filename).suffix.lower() not in {".jpg", ".jpeg", ".png"}:
-            continue
-        dest = inbox / filename
-        dest.write_bytes(await upload.read())
-        saved += 1
-    if saved == 0:
-        raise HTTPException(400, "No JPG/PNG files were uploaded")
-    return start_prepare(annotator=annotator, name=name or "Uploaded photos", uploaded=inbox)
+    raise HTTPException(400, KIT_ONLY)
 
 
 @app.get("/api/jobs/{job_id}")
@@ -264,8 +306,7 @@ def api_export(batch_id: int) -> StreamingResponse:
     if batch is None:
         raise HTTPException(404, "Batch not found")
     rows = export_rows(batch_id)
-    folder = EXPORTS / str(batch_id)
-    folder.mkdir(parents=True, exist_ok=True)
+    folder = session_export_folder(batch_id)
     csv_path = folder / "labels.csv"
     fieldnames = [
         "image",

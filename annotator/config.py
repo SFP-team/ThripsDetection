@@ -76,5 +76,6 @@ def save_settings(settings: Settings) -> Settings:
 
 def public_settings(settings: Settings) -> dict:
     payload = asdict(settings)
+    payload.pop("ssh_password", None)
     payload["ssh_password_set"] = bool(settings.ssh_password)
     return payload

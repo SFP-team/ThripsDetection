@@ -13,7 +13,9 @@ from typing import Any
 from annotator.config import REPO, Settings, load_settings
 from annotator.db import (
     DATA,
+    batch_count,
     create_batch,
+    find_ready_batch,
     insert_image,
     insert_tile,
     session,
@@ -47,18 +49,25 @@ def start_import(
     local_path: str = "",
     use_remote: bool = False,
 ) -> dict[str, Any]:
+    existing = find_ready_batch()
+    if existing is not None:
+        return {"job_id": None, "batch_id": existing, "reused": True}
+    if batch_count():
+        raise RuntimeError("A batch already exists. Open it instead of importing again.")
+
     settings = load_settings()
-    batch_name = name.strip() or "Existing foliage tiles"
+    run_dir = _local_run_dir(local_path, settings)
+    batch_name = name.strip() or "Foliage tiles"
     batch_id = create_batch(batch_name, annotator, source="import", status="preparing")
     job_id = uuid.uuid4().hex[:12]
-    JOBS[job_id] = _job("running", "copying", "Starting import", batch_id=batch_id)
+    JOBS[job_id] = _job("running", "copying", "Opening local tiles", batch_id=batch_id)
     thread = threading.Thread(
         target=_run_import,
-        args=(job_id, batch_id, annotator, local_path, use_remote, settings),
+        args=(job_id, batch_id, annotator, str(run_dir), False, settings),
         daemon=True,
     )
     thread.start()
-    return {"job_id": job_id, "batch_id": batch_id}
+    return {"job_id": job_id, "batch_id": batch_id, "reused": False}
 
 
 def start_prepare(
@@ -90,7 +99,7 @@ def _run_import(
     settings: Settings,
 ) -> None:
     try:
-        run_dir = _resolve_run_dir(job_id, batch_id, local_path, use_remote, settings)
+        run_dir = _local_run_dir(local_path, settings)
         _update(job_id, status="running", step="copying", detail="Reading foliage tiles")
         count = ingest_run(batch_id, run_dir)
         set_batch_status(batch_id, "ready")
@@ -156,26 +165,23 @@ def _list_images(folder: Path) -> list[Path]:
     )
 
 
-def _resolve_run_dir(
-    job_id: str,
-    batch_id: int,
-    local_path: str,
-    use_remote: bool,
-    settings: Settings,
-) -> Path:
+def _local_run_dir(local_path: str, settings: Settings) -> Path:
     if local_path:
         path = Path(local_path).expanduser().resolve()
         if not path.is_dir():
             raise FileNotFoundError(f"Folder not found: {path}")
+        if not (path / "tiles_foliage.csv").exists():
+            raise FileNotFoundError(f"Missing tiles_foliage.csv in {path}")
         return path
     if settings.local_existing_run:
         path = Path(settings.local_existing_run).expanduser().resolve()
         if path.is_dir() and (path / "tiles_foliage.csv").exists():
             return path
-    if use_remote or settings.pipeline_mode == "ssh":
-        return _pull_remote_run(job_id, batch_id, settings)
+    cached = DATA / "cache" / "existing_run"
+    if cached.is_dir() and (cached / "tiles_foliage.csv").exists():
+        return cached
     raise FileNotFoundError(
-        "No existing tile folder found. Set a local path or enable the GPU server."
+        "No foliage tiles in this folder. Copy annotator/data/cache/existing_run into the kit."
     )
 
 
@@ -217,11 +223,18 @@ def ingest_run(batch_id: int, run_dir: Path, keep_names: set[str] | None = None)
     if not tile_rows:
         raise RuntimeError("No foliage tiles to import.")
 
+    try:
+        run_dir.relative_to(DATA)
+        inplace = True
+    except ValueError:
+        inplace = False
+
     media = DATA / "media" / str(batch_id)
     tiles_out = media / "tiles"
     crops_out = media / "crops"
-    tiles_out.mkdir(parents=True, exist_ok=True)
-    crops_out.mkdir(parents=True, exist_ok=True)
+    if not inplace:
+        tiles_out.mkdir(parents=True, exist_ok=True)
+        crops_out.mkdir(parents=True, exist_ok=True)
 
     foliage_dir = run_dir / "foliage_tiles"
     crop_dir = run_dir / "plant_crops"
@@ -234,10 +247,7 @@ def ingest_run(batch_id: int, run_dir: Path, keep_names: set[str] | None = None)
             src_crop = crop_dir / f"{stem}_plant.jpg"
             crop_rel = None
             if src_crop.exists():
-                dest = crops_out / src_crop.name
-                if not dest.exists():
-                    shutil.copy2(src_crop, dest)
-                crop_rel = str(dest.relative_to(DATA))
+                crop_rel = _store_file(src_crop, crops_out / src_crop.name, inplace)
             image_ids[filename] = insert_image(conn, batch_id, filename, info, crop_rel)
 
         count = 0
@@ -248,20 +258,27 @@ def ingest_run(batch_id: int, run_dir: Path, keep_names: set[str] | None = None)
                 src = fallback if fallback.exists() else src
             if not src.exists():
                 continue
-            dest = tiles_out / row["tile"]
-            if not dest.exists():
-                shutil.copy2(src, dest)
+            dest_rel = _store_file(src, tiles_out / row["tile"], inplace)
             insert_tile(
                 conn,
                 batch_id,
                 image_ids[row["image"]],
                 row,
-                str(dest.relative_to(DATA)),
+                dest_rel,
             )
             count += 1
     if count == 0:
         raise RuntimeError("Foliage tile files were listed but not found on disk.")
     return count
+
+
+def _store_file(src: Path, dest: Path, inplace: bool) -> str:
+    if inplace:
+        return str(src.resolve().relative_to(DATA))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if not dest.exists():
+        shutil.copy2(src, dest)
+    return str(dest.relative_to(DATA))
 
 
 def _prepare_local(job_id: str, batch_id: int, image_dir: Path, settings: Settings) -> Path:

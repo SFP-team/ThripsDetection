@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS batches (
     status TEXT NOT NULL DEFAULT 'ready',
     source TEXT NOT NULL DEFAULT 'import',
     error TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    session_key TEXT
 );
 
 CREATE TABLE IF NOT EXISTS images (
@@ -107,6 +108,12 @@ def init_db() -> None:
         for name in ("tissue", "injury", "curl"):
             if name not in columns:
                 conn.execute(f"ALTER TABLE labels ADD COLUMN {name} TEXT")
+        batch_cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(batches)").fetchall()
+        }
+        if "session_key" not in batch_cols:
+            conn.execute("ALTER TABLE batches ADD COLUMN session_key TEXT")
 
 
 def row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -115,14 +122,20 @@ def row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return {key: row[key] for key in row.keys()}
 
 
-def create_batch(name: str, annotator: str, source: str, status: str = "preparing") -> int:
+def create_batch(
+    name: str,
+    annotator: str,
+    source: str,
+    status: str = "preparing",
+    session_key: str | None = None,
+) -> int:
     with session() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO batches (name, annotator, status, source, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO batches (name, annotator, status, source, created_at, session_key)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (name, annotator, status, source, now_iso()),
+            (name, annotator, status, source, now_iso(), session_key),
         )
         return int(cursor.lastrowid)
 
@@ -140,6 +153,11 @@ def set_batch_annotator(batch_id: int, annotator: str) -> None:
         conn.execute("UPDATE batches SET annotator = ? WHERE id = ?", (annotator, batch_id))
 
 
+def set_batch_session_key(batch_id: int, session_key: str) -> None:
+    with session() as conn:
+        conn.execute("UPDATE batches SET session_key = ? WHERE id = ?", (session_key, batch_id))
+
+
 def list_batches() -> list[dict[str, Any]]:
     with session() as conn:
         rows = conn.execute("SELECT * FROM batches ORDER BY id DESC").fetchall()
@@ -149,6 +167,24 @@ def list_batches() -> list[dict[str, Any]]:
             item["counts"] = _counts(conn, int(row["id"]))
             batches.append(item)
         return batches
+
+
+def find_ready_batch() -> int | None:
+    with session() as conn:
+        row = conn.execute(
+            """
+            SELECT id FROM batches
+            WHERE status = 'ready'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        return int(row["id"]) if row else None
+
+
+def batch_count() -> int:
+    with session() as conn:
+        return int(conn.execute("SELECT COUNT(*) FROM batches").fetchone()[0])
 
 
 def get_batch(batch_id: int) -> dict[str, Any] | None:

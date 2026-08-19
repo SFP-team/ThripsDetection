@@ -1,3 +1,6 @@
+const NAME_KEY = "thrips.annotator.name";
+const SESSION_KEY = "thrips.annotator.session";
+
 const state = {
   screen: "load",
   settings: null,
@@ -7,6 +10,15 @@ const state = {
   jobId: null,
   poll: null,
   draft: { tissue: null, injury: null, curl: null },
+  fromReview: false,
+  plantFilter: "",
+  skipPush: false,
+};
+
+const TISSUE_NAME = {
+  flush: "new growth",
+  mature: "old leaves",
+  tube: "not a leaf",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -32,7 +44,56 @@ async function api(path, options = {}) {
   return response.json();
 }
 
-function show(screen) {
+function pathFor() {
+  if (!state.batch || state.screen === "load" || state.screen === "progress") return "/";
+  if (state.screen === "review") {
+    const query = state.plantFilter ? `?plant=${encodeURIComponent(state.plantFilter)}` : "";
+    return `/batches/${state.batch.id}/review${query}`;
+  }
+  const query = state.tile ? `?tile=${state.tile.id}` : "";
+  return `/batches/${state.batch.id}/label${query}`;
+}
+
+function persist(replace = false) {
+  const name = ($("annotator")?.value || "").trim();
+  if (name) localStorage.setItem(NAME_KEY, name);
+  if (!state.batch) return;
+  const session = {
+    batchId: state.batch.id,
+    tileId: state.tile?.id || null,
+    screen: state.screen,
+    plantFilter: state.plantFilter || "",
+    fromReview: state.fromReview,
+  };
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  const url = pathFor();
+  const next = `${location.origin}${url}`;
+  if (next === location.href) return;
+  const method = replace || state.skipPush ? "replaceState" : "pushState";
+  history[method](session, "", url);
+}
+
+function readSession() {
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function parseLocation() {
+  const match = location.pathname.match(/^\/batches\/(\d+)\/(label|review)$/);
+  if (!match) return null;
+  const params = new URLSearchParams(location.search);
+  return {
+    batchId: Number(match[1]),
+    screen: match[2],
+    tileId: params.get("tile") ? Number(params.get("tile")) : null,
+    plantFilter: params.get("plant") || "",
+  };
+}
+
+function show(screen, replace = false) {
   state.screen = screen;
   document.body.dataset.screen = screen;
   for (const id of ["load", "progress", "label", "review"]) {
@@ -48,10 +109,22 @@ function show(screen) {
   if (state.batch) {
     $("export-link").href = `/api/batches/${state.batch.id}/export`;
   }
+  persist(replace);
 }
 
 function annotator() {
-  return $("annotator").value.trim() || state.settings?.annotator || "lab";
+  return ($("annotator").value.trim() || localStorage.getItem(NAME_KEY) || "").trim();
+}
+
+function requireName() {
+  const name = annotator();
+  if (!name) {
+    flash({ message: "Type your name first." });
+    return "";
+  }
+  localStorage.setItem(NAME_KEY, name);
+  $("annotator").value = name;
+  return name;
 }
 
 function flash(error) {
@@ -75,12 +148,34 @@ function fadeImage(node, src) {
   }, 140);
 }
 
+function draftKey(tileId) {
+  return `thrips.draft.${tileId}`;
+}
+
+function stashDraft() {
+  if (!state.tile) return;
+  sessionStorage.setItem(draftKey(state.tile.id), JSON.stringify(state.draft));
+}
+
 function resetDraft(fromLabel) {
   state.draft = {
     tissue: fromLabel?.tissue || null,
     injury: fromLabel?.injury || fromLabel?.label || null,
     curl: fromLabel?.curl || null,
   };
+}
+
+function restoreDraft(tile) {
+  const raw = sessionStorage.getItem(draftKey(tile.id));
+  if (!raw) {
+    resetDraft(tile.current_label);
+    return;
+  }
+  try {
+    state.draft = JSON.parse(raw);
+  } catch {
+    resetDraft(tile.current_label);
+  }
 }
 
 function paintDraft() {
@@ -113,18 +208,18 @@ const STEP_TITLES = {
   finding: "Finding the plant",
   cutting: "Cutting it out of the background",
   leaves: "Keeping only leaf squares",
-  copying: "Copying tiles",
+  copying: "Opening tiles",
   ready: "Ready to label",
   error: "Something went wrong",
 };
 
 async function watchJob(jobId) {
   state.jobId = jobId;
-  show("progress");
+  show("progress", true);
   if (state.poll) clearInterval(state.poll);
   const tick = async () => {
     const job = await api(`/api/jobs/${jobId}`);
-    setProgress(job.step || "finding", STEP_TITLES[job.step] || job.step, job.detail);
+    setProgress(job.step || "copying", STEP_TITLES[job.step] || job.step, job.detail);
     if (job.status === "done") {
       clearInterval(state.poll);
       await openBatch(job.batch_id);
@@ -139,7 +234,9 @@ async function watchJob(jobId) {
   state.poll = setInterval(tick, 1500);
 }
 
-async function openBatch(batchId, tileId = null) {
+async function openBatch(batchId, tileId = null, options = {}) {
+  stashDraft();
+  if (options.fromReview != null) state.fromReview = options.fromReview;
   state.batch = await api(`/api/batches/${batchId}`);
   const query = tileId ? `tile_id=${tileId}` : "";
   const payload = await api(`/api/batches/${batchId}/next?${query}`);
@@ -147,14 +244,14 @@ async function openBatch(batchId, tileId = null) {
   if (payload.done && !tileId) {
     state.tile = null;
     state.plant = [];
-    show("label");
+    show("label", options.replace);
     renderDone();
     return;
   }
   state.tile = payload.tile;
   state.plant = payload.plant;
-  resetDraft(payload.tile?.current_label);
-  show("label");
+  restoreDraft(payload.tile);
+  show("label", options.replace);
   renderLabel();
 }
 
@@ -188,7 +285,7 @@ function renderLabel() {
   const pct = counts.tiles ? Math.round((counts.labeled / counts.tiles) * 100) : 0;
   $("label-meta").innerHTML = `
     <span>${state.tile.image} · plant ${plantNo} / ${plants.length} · tile ${tileNo} / ${plantTiles.length}</span>
-    <span>${counts.labeled} labeled · ${counts.unlabeled} left · ${counts.flush_injured || 0} flush injured</span>
+    <span>${counts.labeled} labeled · ${counts.unlabeled} left · ${counts.flush_injured || 0} new growth injured</span>
   `;
   $("progress-fill").style.width = `${pct}%`;
   fadeImage($("tile-image"), `/media/tile/${state.tile.id}`);
@@ -200,7 +297,7 @@ function renderLabel() {
   $("filmstrip").innerHTML = plantTiles
     .map(
       (item) => `
-      <button type="button" class="${item.id === state.tile.id ? "current" : ""} ${tileTone(item)}" data-tile="${item.id}" title="${item.tissue || "unlabeled"} ${item.curl ? `curl ${item.curl}` : ""}">
+      <button type="button" class="${item.id === state.tile.id ? "current" : ""} ${tileTone(item)}" data-tile="${item.id}" title="${TISSUE_NAME[item.tissue] || "unlabeled"} ${item.curl ? `curl ${item.curl}` : ""}">
         <img src="/media/tile/${item.id}" alt="${item.tile}">
       </button>`
     )
@@ -211,11 +308,11 @@ function renderLabel() {
 
 function draftStatus() {
   if (!state.draft.tissue) return "Mark the tissue first.";
-  if (state.draft.tissue !== "flush") return `${state.draft.tissue} — saved as skip.`;
-  if (!state.draft.injury) return "Flush — now mark healthy, injured, or skip.";
-  if (state.draft.injury === "skip") return "Flush skip — not scored.";
-  if (!state.draft.curl) return `Flush ${state.draft.injury} — now mark curl yes or no.`;
-  return `Flush ${state.draft.injury}, curl ${state.draft.curl}.`;
+  if (state.draft.tissue !== "flush") return `${TISSUE_NAME[state.draft.tissue]} saved as skip.`;
+  if (!state.draft.injury) return "New growth. Now mark healthy, injured, or skip.";
+  if (state.draft.injury === "skip") return "New growth skip. Not scored.";
+  if (!state.draft.curl) return `New growth ${state.draft.injury}. Now mark curl yes or no.`;
+  return `New growth ${state.draft.injury}, curl ${state.draft.curl}.`;
 }
 
 function canSaveDraft() {
@@ -227,6 +324,8 @@ function canSaveDraft() {
 
 async function saveDraft() {
   if (!state.tile || !canSaveDraft()) return;
+  const name = requireName();
+  if (!name) return;
   const payload = await api("/api/label", {
     method: "POST",
     body: JSON.stringify({
@@ -234,20 +333,29 @@ async function saveDraft() {
       tissue: state.draft.tissue,
       injury: state.draft.injury,
       curl: state.draft.curl,
-      annotator: annotator(),
+      annotator: name,
     }),
   });
+  sessionStorage.removeItem(draftKey(state.tile.id));
   state.batch = payload.batch;
+  if (state.fromReview) {
+    state.fromReview = false;
+    show("review");
+    await renderReview();
+    return;
+  }
   if (payload.done) {
     state.tile = null;
     state.plant = [];
     renderDone();
+    persist(true);
     return;
   }
   state.tile = payload.next;
   state.plant = payload.plant;
-  resetDraft(null);
+  restoreDraft(payload.next);
   renderLabel();
+  persist(true);
 }
 
 async function chooseTissue(tissue) {
@@ -263,6 +371,7 @@ async function chooseTissue(tissue) {
   state.draft.injury = null;
   state.draft.curl = null;
   paintDraft();
+  stashDraft();
 }
 
 async function chooseInjury(injury) {
@@ -275,6 +384,7 @@ async function chooseInjury(injury) {
     return;
   }
   paintDraft();
+  stashDraft();
   if (state.draft.curl) await saveDraft();
 }
 
@@ -298,8 +408,10 @@ async function undo() {
   state.batch = payload.batch;
   state.tile = payload.tile;
   state.plant = payload.plant;
+  state.fromReview = false;
   resetDraft(payload.tile?.current_label);
-  show("label");
+  if (payload.tile) sessionStorage.removeItem(draftKey(payload.tile.id));
+  show("label", true);
   renderLabel();
 }
 
@@ -312,132 +424,185 @@ function reviewBucket(item) {
 
 async function renderReview() {
   if (!state.batch) return;
-  const imageId = $("review-plant").value;
+  const imageId = $("review-plant").value || state.plantFilter;
+  state.plantFilter = imageId || "";
   const query = imageId ? `image_id=${imageId}` : "";
   const payload = await api(`/api/batches/${state.batch.id}/review?${query}`);
   state.batch = payload.batch;
   const counts = state.batch.counts;
   $("review-counts").textContent =
-    `${counts.flush_healthy || 0} flush healthy · ${counts.flush_injured || 0} flush injured · ${counts.curl_yes || 0} curl · ${counts.mature || 0} mature · ${counts.unlabeled} left`;
+    `${counts.flush_healthy || 0} new growth healthy · ${counts.flush_injured || 0} new growth injured · ${counts.curl_yes || 0} curl · ${counts.mature || 0} old leaves · ${counts.unlabeled} left`;
   const select = $("review-plant");
-  const current = select.value;
   select.innerHTML =
     `<option value="">All plants</option>` +
     (state.batch.images || [])
       .map((item) => `<option value="${item.id}">${item.filename}</option>`)
       .join("");
-  select.value = current;
+  select.value = state.plantFilter;
   for (const name of ["flush_healthy", "flush_injured", "mature", "skip"]) {
     const column = document.querySelector(`[data-col="${name}"]`);
     const tiles = payload.tiles.filter((item) => reviewBucket(item) === name);
     column.innerHTML = tiles
-      .map(
-        (item) => `
-        <button type="button" data-tile="${item.id}" title="${item.image} ${item.tissue || ""} ${item.injury || ""} ${item.curl ? `curl ${item.curl}` : ""}">
-          <img src="/media/tile/${item.id}" alt="${item.tile}">
-          ${item.curl ? `<span class="curl-chip">${item.curl === "yes" ? "curl" : "flat"}</span>` : ""}
-        </button>`
-      )
+      .map((item) => {
+        const curl = item.curl
+          ? `<span class="curl-chip">${item.curl === "yes" ? "curl" : "flat"}</span>`
+          : "";
+        return `<button type="button" data-tile="${item.id}" title="${item.image} ${item.tissue || ""} ${item.injury || ""} ${item.curl ? `curl ${item.curl}` : ""}"><img src="/media/tile/${item.id}" alt="${item.tile}">${curl}</button>`;
+      })
       .join("");
   }
 }
 
 async function loadSettings() {
   state.settings = await api("/api/settings");
-  $("annotator").value = state.settings.annotator || "lab";
-  for (const key of [
-    "pipeline_mode",
-    "ssh_host",
-    "ssh_user",
-    "remote_existing_run",
-    "local_existing_run",
-    "local_project",
-  ]) {
-    if ($(key)) $(key).value = state.settings[key] || "";
-  }
-  if (state.settings.ssh_password_set) {
-    $("ssh_password").placeholder = "saved";
-  }
+  $("annotator").value = localStorage.getItem(NAME_KEY) || "";
 }
 
-async function loadBatches() {
-  const batches = await api("/api/batches");
-  const ready = batches.filter((item) => item.status === "ready");
-  $("batch-list").hidden = ready.length === 0;
-  $("batches").innerHTML = ready
+async function loadSessions() {
+  const sessions = await api("/api/sessions");
+  $("session-list").hidden = sessions.length === 0;
+  $("start-btn").disabled = sessions.length === 0;
+  if (!sessions.length) {
+    $("home-status").textContent = "No session yet. Upload a folder below.";
+    $("batches").innerHTML = "";
+    return sessions;
+  }
+  const latest = sessions[0];
+  $("home-status").textContent =
+    `${latest.name} · ${latest.counts.labeled} labeled · ${latest.counts.unlabeled} left. Saved in ${latest.folder || "this folder"}.`;
+  $("batches").innerHTML = sessions
     .map((item) => {
       const left = item.counts.unlabeled;
-      return `<li><button type="button" data-batch="${item.id}">
+      return `<li><button type="button" data-batch="${item.batch_id}">
         <span>${item.name}</span>
-        <span class="mono">BAT-${item.id} · ${item.counts.tiles} tiles · ${left} left</span>
+        <span class="mono">${item.counts.tiles} tiles · ${left} left</span>
       </button></li>`;
     })
     .join("");
+  return sessions;
 }
 
-$("form-import").addEventListener("submit", async (event) => {
+async function startWork(tileId = null, options = {}) {
+  const name = requireName();
+  if (!name) return;
+  const sessions = await loadSessions();
+  if (!sessions.length) {
+    flash({ message: "Upload a folder of tiles first." });
+    return;
+  }
+  const remembered = readSession();
+  const batchId = options.batchId || remembered?.batchId || sessions[0].batch_id;
+  const known = sessions.some((item) => item.batch_id === batchId);
+  await openBatch(known ? batchId : sessions[0].batch_id, tileId, options);
+}
+
+async function createSessionFromPath() {
+  const name = requireName();
+  if (!name) return;
+  const path = $("session-path").value.trim();
+  if (!path) {
+    flash({ message: "Choose a folder or paste a path." });
+    return;
+  }
+  show("progress", true);
+  setProgress("copying", "Copying folder into this app", path);
+  const job = await api("/api/sessions/from-path", {
+    method: "POST",
+    body: JSON.stringify({
+      annotator: name,
+      name: $("session-name").value.trim(),
+      path,
+    }),
+  });
+  await openBatch(job.batch_id);
+}
+
+async function createSessionFromFiles(fileList) {
+  const name = requireName();
+  if (!name) return;
+  const files = [...fileList];
+  if (!files.length) {
+    flash({ message: "Choose a folder of tiles." });
+    return;
+  }
+  const data = new FormData();
+  data.append("annotator", name);
+  data.append("name", $("session-name").value.trim() || files[0].webkitRelativePath.split("/")[0] || "");
+  for (const file of files) {
+    data.append("files", file);
+    data.append("relpaths", file.webkitRelativePath || file.name);
+  }
+  show("progress", true);
+  setProgress("copying", "Copying folder into this app", `${files.length} files`);
+  const response = await fetch("/api/sessions/upload", { method: "POST", body: data });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body.detail || JSON.stringify(body);
+    } catch {
+      detail = await response.text();
+    }
+    throw new Error(detail);
+  }
+  const job = await response.json();
+  await openBatch(job.batch_id);
+}
+
+async function filesFromDrop(event) {
+  const items = [...(event.dataTransfer?.items || [])];
+  if (!items.length) return [...(event.dataTransfer?.files || [])];
+  const files = [];
+  const walk = async (entry, prefix) => {
+    if (entry.isFile) {
+      const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+      Object.defineProperty(file, "webkitRelativePath", { value: `${prefix}${entry.name}` });
+      files.push(file);
+      return;
+    }
+    if (!entry.isDirectory) return;
+    const reader = entry.createReader();
+    const entries = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+    for (const child of entries) {
+      await walk(child, `${prefix}${entry.name}/`);
+    }
+  };
+  for (const item of items) {
+    const entry = item.webkitGetAsEntry?.();
+    if (entry) await walk(entry, "");
+  }
+  return files.length ? files : [...(event.dataTransfer?.files || [])];
+}
+
+$("form-start").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
-    const path = $("import-path").value.trim();
-    const job = await api("/api/import", {
-      method: "POST",
-      body: JSON.stringify({
-        annotator: annotator(),
-        path,
-        remote: !path,
-        name: path ? "Local foliage tiles" : "Existing foliage tiles",
-      }),
-    });
-    await watchJob(job.job_id);
+    const session = readSession();
+    await startWork(session?.tileId || null);
   } catch (error) {
     flash(error);
   }
 });
 
-$("form-prepare").addEventListener("submit", async (event) => {
+$("form-session").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
-    const job = await api("/api/prepare", {
-      method: "POST",
-      body: JSON.stringify({
-        annotator: annotator(),
-        path: $("prepare-path").value.trim(),
-        name: $("prepare-name").value.trim(),
-      }),
-    });
-    await watchJob(job.job_id);
+    await createSessionFromPath();
   } catch (error) {
     flash(error);
+    show("load");
   }
 });
 
-$("form-settings").addEventListener("submit", async (event) => {
-  event.preventDefault();
+$("folder-input").addEventListener("change", async (event) => {
   try {
-    const body = {
-      annotator: annotator(),
-      pipeline_mode: $("pipeline_mode").value,
-      ssh_host: $("ssh_host").value,
-      ssh_user: $("ssh_user").value,
-      remote_existing_run: $("remote_existing_run").value,
-      local_existing_run: $("local_existing_run").value,
-      local_project: $("local_project").value,
-    };
-    const password = $("ssh_password").value;
-    if (password) body.ssh_password = password;
-    state.settings = await api("/api/settings", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    $("ssh_password").value = "";
-    $("ssh_password").placeholder = state.settings.ssh_password_set ? "saved" : "unchanged if blank";
-    flash({ message: "Settings saved" });
+    await createSessionFromFiles(event.target.files);
   } catch (error) {
     flash(error);
+    show("load");
   }
 });
 
-$("file-input").addEventListener("change", uploadFiles);
 $("drop-zone").addEventListener("dragover", (event) => {
   event.preventDefault();
   $("drop-zone").classList.add("is-over");
@@ -445,35 +610,57 @@ $("drop-zone").addEventListener("dragover", (event) => {
 $("drop-zone").addEventListener("dragleave", () => {
   $("drop-zone").classList.remove("is-over");
 });
-$("drop-zone").addEventListener("drop", (event) => {
+$("drop-zone").addEventListener("drop", async (event) => {
   event.preventDefault();
   $("drop-zone").classList.remove("is-over");
-  uploadFiles({ target: { files: event.dataTransfer.files } });
-});
-
-async function uploadFiles(event) {
-  const files = [...(event.target.files || [])];
-  if (!files.length) return;
-  const data = new FormData();
-  data.append("annotator", annotator());
-  data.append("name", $("prepare-name").value.trim() || "Uploaded photos");
-  for (const file of files) data.append("files", file);
   try {
-    show("progress");
-    setProgress("finding", "Uploading photos", `${files.length} files`);
-    const response = await fetch("/api/prepare/upload", { method: "POST", body: data });
-    if (!response.ok) throw new Error(await response.text());
-    const job = await response.json();
-    await watchJob(job.job_id);
+    const files = await filesFromDrop(event);
+    await createSessionFromFiles(files);
   } catch (error) {
     flash(error);
     show("load");
   }
-}
+});
 
 $("batches").addEventListener("click", (event) => {
   const button = event.target.closest("[data-batch]");
-  if (button) openBatch(Number(button.dataset.batch));
+  if (!button) return;
+  startWork(null, { batchId: Number(button.dataset.batch) }).catch(flash);
+});
+
+$("filmstrip").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-tile]");
+  if (button) openBatch(state.batch.id, Number(button.dataset.tile), { fromReview: false, replace: true }).catch(flash);
+});
+
+$("top-nav").addEventListener("click", (event) => {
+  const go = event.target.dataset.go;
+  if (go === "load") {
+    state.fromReview = false;
+    show("load");
+    loadSessions().catch(flash);
+  }
+  if (go === "label" && state.batch) {
+    openBatch(state.batch.id, state.tile?.id || readSession()?.tileId || null, {
+      fromReview: false,
+    }).catch(flash);
+  }
+  if (go === "review" && state.batch) {
+    state.fromReview = false;
+    show("review");
+    renderReview().catch(flash);
+  }
+});
+
+$("review-plant").addEventListener("change", () => {
+  state.plantFilter = $("review-plant").value;
+  renderReview().then(() => persist(true)).catch(flash);
+});
+
+document.querySelector(".columns").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-tile]");
+  if (!button) return;
+  openBatch(state.batch.id, Number(button.dataset.tile), { fromReview: true }).catch(flash);
 });
 
 document.querySelector("#step-tissue").addEventListener("click", (event) => {
@@ -488,35 +675,13 @@ document.querySelector("#step-injury").addEventListener("click", (event) => {
   if (curl) chooseCurl(curl.dataset.curl).catch(flash);
 });
 
-$("filmstrip").addEventListener("click", (event) => {
-  const button = event.target.closest("[data-tile]");
-  if (button) openBatch(state.batch.id, Number(button.dataset.tile)).catch(flash);
-});
-
-$("top-nav").addEventListener("click", (event) => {
-  const go = event.target.dataset.go;
-  if (go === "load") show("load");
-  if (go === "label" && state.batch) openBatch(state.batch.id).catch(flash);
-  if (go === "review" && state.batch) {
-    show("review");
-    renderReview().catch(flash);
-  }
-});
-
-$("review-plant").addEventListener("change", () => renderReview().catch(flash));
-
-document.querySelector(".columns").addEventListener("click", (event) => {
-  const button = event.target.closest("[data-tile]");
-  if (!button) return;
-  openBatch(state.batch.id, Number(button.dataset.tile)).catch(flash);
-});
-
 document.addEventListener("keydown", (event) => {
   const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName);
   if (typing || state.screen !== "label") return;
   const key = event.key;
   if (key === "Escape") {
     resetDraft(state.tile?.current_label);
+    if (state.tile) sessionStorage.removeItem(draftKey(state.tile.id));
     paintDraft();
     if ($("draft-status")) $("draft-status").textContent = draftStatus();
     return;
@@ -528,13 +693,13 @@ document.addEventListener("keydown", (event) => {
   if (key === "ArrowRight" && state.plant.length && state.tile) {
     const index = state.plant.findIndex((item) => item.id === state.tile.id);
     const next = state.plant[index + 1];
-    if (next) openBatch(state.batch.id, next.id).catch(flash);
+    if (next) openBatch(state.batch.id, next.id, { fromReview: false, replace: true }).catch(flash);
     return;
   }
   if (key === "ArrowLeft" && state.plant.length && state.tile) {
     const index = state.plant.findIndex((item) => item.id === state.tile.id);
     const prev = state.plant[index - 1];
-    if (prev) openBatch(state.batch.id, prev.id).catch(flash);
+    if (prev) openBatch(state.batch.id, prev.id, { fromReview: false, replace: true }).catch(flash);
     else undo().catch(flash);
     return;
   }
@@ -554,4 +719,36 @@ document.addEventListener("keydown", (event) => {
   if (key === "n" || key === "N") chooseCurl("no").catch(flash);
 });
 
-loadSettings().then(loadBatches).catch(flash);
+window.addEventListener("popstate", () => {
+  boot({ fromHistory: true }).catch(flash);
+});
+
+async function boot(options = {}) {
+  await loadSettings();
+  const sessions = await loadSessions();
+  const ready = sessions[0];
+  const located = parseLocation();
+  const session = readSession();
+  const target = options.fromHistory ? located : located || session;
+  if (target?.batchId && ready) {
+    const known = sessions.some((item) => item.batch_id === target.batchId);
+    const batchId = known ? target.batchId : ready.batch_id;
+    const tileId = known ? target.tileId : null;
+    state.plantFilter = target.plantFilter || session?.plantFilter || "";
+    if (target.screen === "review") {
+      state.fromReview = false;
+      state.batch = await api(`/api/batches/${batchId}`);
+      show("review", true);
+      await renderReview();
+      return;
+    }
+    await openBatch(batchId, tileId, {
+      replace: true,
+      fromReview: Boolean(session?.fromReview),
+    });
+    return;
+  }
+  show("load", true);
+}
+
+boot().catch(flash);

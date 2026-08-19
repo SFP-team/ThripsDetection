@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Blueberry Breeding Programme · Florida Gainesville</title>
+  <title>Tiles annotator for thrips detection</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Geist:wght@400;500&display=swap" rel="stylesheet">
@@ -14,16 +14,13 @@
   <div id="app">
     <header class="top">
       <div class="brand">
-        <span class="triangle" aria-hidden="true">▲</span>
-        <div>
-          <p class="eyebrow">Florida · Gainesville</p>
-          <p class="wordmark">Blueberry Breeding Programme</p>
-        </div>
+        <img class="brand-logo" src="/static/logo.png" alt="Blueberry Breeding Program">
+        <p class="eyebrow">Florida · Gainesville</p>
       </div>
       <nav class="top-nav" id="top-nav" hidden>
         <button type="button" data-go="label">Label</button>
         <button type="button" data-go="review">Review</button>
-        <button type="button" data-go="load">New batch</button>
+        <button type="button" data-go="load">Home</button>
         <a id="export-link" class="ghost" href="#">Export CSV</a>
       </nav>
     </header>
@@ -31,76 +28,51 @@
     <section id="screen-load" class="screen is-visible">
       <div class="hero">
         <div>
-          <p class="eyebrow">For chilli thrips scoring</p>
-          <h1>Label the leaf squares.</h1>
-          <p class="lead">Load rover photos. The programme finds each plant and keeps the leaf squares. You mark tissue first — flush, mature, or tube — then only flush squares get healthy / injured and a curl tag. No 1–5 on a square.</p>
+          <p class="eyebrow">Blueberry Breeding Program</p>
+          <h1>Tiles annotator for thrips detection</h1>
+          <p class="lead">Upload a folder of leaf tiles to start a session. Marks stay in that session on this computer. Close and come back: you continue the same session. A new folder starts a new session.</p>
         </div>
-        <span class="hero-mark" aria-hidden="true">▲</span>
       </div>
 
-      <div class="grid-2">
-        <form id="form-import" class="panel">
-          <p class="panel-kicker">Resume</p>
-          <h2>Use tiles we already made</h2>
-          <p>Pull the 627 foliage tiles from the last segmentation run. No GPU needed.</p>
-          <label>Your name
-            <input id="annotator" name="annotator" autocomplete="nickname" value="lab">
-          </label>
-          <label>Or a folder already on this computer
-            <input id="import-path" placeholder="/path/to/birefnet_tiles">
-          </label>
-          <button type="submit" class="primary">Load existing tiles</button>
-        </form>
+      <form id="form-start" class="panel">
+        <p class="panel-kicker">Continue</p>
+        <h2>Open the last session</h2>
+        <p id="home-status">No session yet. Upload a folder below.</p>
+        <label>Your name
+          <input id="annotator" name="annotator" autocomplete="nickname" required placeholder="First name">
+        </label>
+        <button type="submit" class="primary" id="start-btn">Continue last session</button>
+      </form>
 
-        <form id="form-prepare" class="panel">
-          <p class="panel-kicker">New capture</p>
-          <h2>Load new rover photos</h2>
-          <p>Folder of JPGs on this computer. Plants are cut out and tiled automatically.</p>
-          <label>Folder path
-            <input id="prepare-path" placeholder="/path/to/rover/photos" required>
-          </label>
-          <label>Batch name
-            <input id="prepare-name" placeholder="Field day 18 Aug">
-          </label>
-          <button type="submit" class="primary">Segment and tile</button>
-          <p class="or">or drop photos here</p>
-          <label class="drop" id="drop-zone">
-            <input id="file-input" type="file" accept=".jpg,.jpeg,.png" multiple hidden>
-            Drop JPG files, or click to choose
-          </label>
-        </form>
-      </div>
-
-      <details class="panel settings">
-        <summary>Server settings</summary>
-        <form id="form-settings" class="settings-grid">
-          <label>Mode
-            <select id="pipeline_mode">
-              <option value="ssh">GPU server (ssh)</option>
-              <option value="local">This computer</option>
-            </select>
-          </label>
-          <label>GPU host <input id="ssh_host"></label>
-          <label>GPU user <input id="ssh_user"></label>
-          <label>GPU password <input id="ssh_password" type="password" placeholder="unchanged if blank"></label>
-          <label>Remote existing run <input id="remote_existing_run"></label>
-          <label>Local existing run <input id="local_existing_run"></label>
-          <label>Local segmentation project <input id="local_project"></label>
-          <button type="submit" class="ghost">Save settings</button>
-        </form>
-      </details>
-
-      <div id="batch-list" class="panel" hidden>
-        <p class="panel-kicker">Open</p>
-        <h2>Continue a batch</h2>
+      <div id="session-list" class="panel" hidden>
+        <p class="panel-kicker">Sessions on this computer</p>
+        <h2>Pick a session</h2>
         <ul id="batches"></ul>
       </div>
+
+      <form id="form-session" class="panel">
+        <p class="panel-kicker">New session</p>
+        <h2>Upload a folder of tiles</h2>
+        <p>The app copies that folder into this computer. Then you label. Need the tiled folder (tiles_foliage.csv and foliage tiles), not only raw rover photos.</p>
+        <label>Session name
+          <input id="session-name" placeholder="Field day 19 Aug">
+        </label>
+        <label>Or a folder path on this computer
+          <input id="session-path" placeholder="/path/to/birefnet_tiles">
+        </label>
+        <button type="submit" class="primary" id="session-path-btn">Start from that path</button>
+        <p class="or">or</p>
+        <label class="drop" id="drop-zone">
+          <input id="folder-input" type="file" webkitdirectory directory multiple hidden>
+          Drop a folder here, or click to choose one
+        </label>
+      </form>
     </section>
 
     <section id="screen-progress" class="screen" hidden>
       <div class="progress-card">
         <p class="eyebrow" id="progress-step">Preparing</p>
-        <h2 id="progress-title">Finding the plant</h2>
+        <h2 id="progress-title">Opening tiles</h2>
         <p id="progress-detail">Starting…</p>
         <ol class="steps">
           <li data-step="finding">Finding the plant</li>
@@ -121,20 +93,20 @@
             <img id="tile-image" alt="Current leaf tile">
           </figure>
           <figure class="context-stage">
-            <figcaption>Whole plant — current square outlined</figcaption>
+            <figcaption>Whole plant, current square outlined</figcaption>
             <img id="context-image" alt="Plant with current tile outlined">
           </figure>
         </div>
         <div class="label-step" id="step-tissue">
           <p class="step-label">1 · What tissue is this?</p>
           <div class="actions">
-            <button type="button" class="choice flush" data-tissue="flush"><kbd>1</kbd> Flush</button>
-            <button type="button" class="choice mature" data-tissue="mature"><kbd>2</kbd> Mature</button>
-            <button type="button" class="choice tube" data-tissue="tube"><kbd>3</kbd> Tube / wood</button>
+            <button type="button" class="choice flush" data-tissue="flush"><kbd>1</kbd> New growth</button>
+            <button type="button" class="choice mature" data-tissue="mature"><kbd>2</kbd> Old leaves</button>
+            <button type="button" class="choice tube" data-tissue="tube"><kbd>3</kbd> Not a leaf</button>
           </div>
         </div>
         <div class="label-step is-dim" id="step-injury">
-          <p class="step-label">2 · If flush: hurt? Then curl?</p>
+          <p class="step-label">2 · If new growth: hurt? Then curl?</p>
           <div class="actions">
             <button type="button" class="choice healthy" data-injury="healthy"><kbd>1</kbd> Healthy</button>
             <button type="button" class="choice injured" data-injury="injured"><kbd>2</kbd> Injured</button>
@@ -147,7 +119,7 @@
         </div>
         <div class="status-row">
           <p class="draft-status" id="draft-status">Mark the tissue first.</p>
-          <p class="hint"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> tissue, then injury &nbsp; <kbd>Y</kbd><kbd>N</kbd> curl &nbsp; <kbd>Z</kbd> undo &nbsp; <kbd>Esc</kbd> back &nbsp; mixed flush = injured</p>
+          <p class="hint"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> tissue, then injury &nbsp; <kbd>Y</kbd><kbd>N</kbd> curl &nbsp; <kbd>Z</kbd> undo &nbsp; <kbd>Esc</kbd> clear this tile &nbsp; mixed new growth = injured</p>
         </div>
         <div class="filmstrip" id="filmstrip"></div>
       </div>
@@ -157,10 +129,10 @@
         <p>Review the columns, or export the CSV for training.</p>
       </div>
       <aside class="rubric">
-        <span><strong>Flush</strong> young top growth. Only these squares get a thrips injury label.</span>
-        <span><strong>Injured</strong> bronze, silver, cup, or crinkle on flush. Mixed flush = injured. Lime crinkle with no bronze or cup = healthy.</span>
-        <span><strong>Curl</strong> yes if the flush is cupped, twisted, or crinkled. Separate from color.</span>
-        <span><strong>Mature / tube</strong> old wood, pot, tag, sky — not scored as thrips. Saved as skip.</span>
+        <span><strong>New growth</strong> young top leaves. Only these squares get a thrips injury label.</span>
+        <span><strong>Injured</strong> bronze, silver, cup, or crinkle on new growth. Mixed new growth = injured. Lime crinkle with no bronze or cup = healthy.</span>
+        <span><strong>Curl</strong> yes if the new growth is cupped, twisted, or crinkled. Separate from color.</span>
+        <span><strong>Old leaves / not a leaf</strong> old wood, pot, tag, sky. Not scored as thrips. Saved as skip.</span>
       </aside>
     </section>
 
@@ -175,19 +147,19 @@
       </div>
       <div class="columns cols-4">
         <section>
-          <h2>Flush healthy</h2>
+          <h2>New growth healthy</h2>
           <div class="column" data-col="flush_healthy"></div>
         </section>
         <section>
-          <h2>Flush injured</h2>
+          <h2>New growth injured</h2>
           <div class="column" data-col="flush_injured"></div>
         </section>
         <section>
-          <h2>Mature</h2>
+          <h2>Old leaves</h2>
           <div class="column" data-col="mature"></div>
         </section>
         <section>
-          <h2>Tube / skip</h2>
+          <h2>Not a leaf</h2>
           <div class="column" data-col="skip"></div>
         </section>
       </div>
