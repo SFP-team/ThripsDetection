@@ -415,21 +415,32 @@ def media_context(tile_id: int) -> StreamingResponse:
     y = (tile.get("y") or 0) - box_y0
     width = tile.get("width") or 512
     height = tile.get("height") or 512
-    draw = ImageDraw.Draw(image)
+    orig_w, orig_h = image.size
     x0, y0 = max(0, x), max(0, y)
-    x1 = min(image.width - 1, x + width - 1)
-    y1 = min(image.height - 1, y + height - 1)
-    if x1 > x0 and y1 > y0:
-        for inset, color in ((0, (250, 204, 21)), (3, (28, 25, 23))):
-            draw.rectangle(
-                (x0 + inset, y0 + inset, x1 - inset, y1 - inset),
-                outline=color,
-                width=4,
-            )
+    x1 = min(orig_w - 1, x + width - 1)
+    y1 = min(orig_h - 1, y + height - 1)
     image.thumbnail((720, 900))
+    if orig_w > 0 and orig_h > 0 and x1 > x0 and y1 > y0:
+        scale_x = image.width / orig_w
+        scale_y = image.height / orig_h
+        box = (
+            int(round(x0 * scale_x)),
+            int(round(y0 * scale_y)),
+            int(round(x1 * scale_x)),
+            int(round(y1 * scale_y)),
+        )
+        draw = ImageDraw.Draw(image)
+        # Draw on the resized image so the outline stays thick on screen.
+        # Black halo, then hot yellow, so it reads on green leaves and the white tube.
+        for color, stroke in (((0, 0, 0), 16), ((255, 220, 0), 9), ((255, 60, 0), 4)):
+            draw.rectangle(box, outline=color, width=stroke)
     buffer = io.BytesIO()
     image.save(buffer, format="JPEG", quality=85)
     buffer.seek(0)
-    return StreamingResponse(buffer, media_type="image/jpeg")
+    return StreamingResponse(
+        buffer,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
