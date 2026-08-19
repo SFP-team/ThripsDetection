@@ -6,6 +6,7 @@ The shipped job is a **plant score**, not an insect count. Insects are too small
 
 ## What is in this repo
 
+- `AGENTS.md` — full handoff for another agent: setup, local vs GPU storage, exports, UI change map
 - `PLAN.md` — locked method: how we tile, what we label, which models we will bake off, how a plant score is formed
 - `annotator/` — local labeling UI (tissue → injury → curl)
 - `segment_and_tile.py` / `filter_tube_tiles.py` — Center BiRefNet plant crop, then 512 px tiles
@@ -32,7 +33,7 @@ Open [http://127.0.0.1:8765](http://127.0.0.1:8765).
 3. If new growth: **healthy / injured / skip**, then **curl yes / no**.
 4. Mixed new growth = injured. Lime crinkle with no bronze or cup = healthy. No 1–5 on a square.
 5. Keys: `1` `2` `3` tissue then injury, `Y` `N` curl, `Z` undo, `Esc` clears this tile.
-6. Close and reopen any time. You return to the same tile. Review the four columns, then export CSV.
+6. Close and reopen: Home is the default. Continue to the last session, or pick one. Review the four columns, then export CSV.
 
 This kit does not store a GPU password. Do not add `annotator/data/settings.json`.
 

@@ -1,5 +1,7 @@
 # Annotator kit
 
+Agents working on this repo: read `AGENTS.md` first. It has setup, where every file lives (this computer and the GPU), how labels are saved, and how to change the UI.
+
 This repo is the **app**. Pictures and labels stay off git.
 
 - Clone or pull this repo to get UI and code updates.
@@ -53,7 +55,7 @@ A new folder upload creates a **new** session. The old session is unchanged.
 
 ## Come back later
 
-Close the browser whenever you want. Open the same address. You return to the same session and tile.
+Close the browser whenever you want. Open the same address. You land on Home. Continue (or pick a session) returns you to the same work.
 
 Home lists every session on this computer.
 
