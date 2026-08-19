@@ -165,6 +165,56 @@ h2 {
   animation: rise 560ms var(--ease-out) both;
 }
 
+.home-name {
+  display: grid;
+  grid-template-columns: minmax(12rem, 20rem) minmax(12rem, 20rem);
+  gap: var(--spacing-16);
+  max-width: 42rem;
+  margin: 0 0 var(--spacing-32);
+}
+
+.home-name label {
+  margin: 0;
+}
+
+.home-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--spacing-16);
+  align-items: stretch;
+  margin: 0 0 var(--spacing-24);
+}
+
+.home-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 28rem;
+  margin-bottom: 0;
+}
+
+.home-card h2 {
+  font-size: 28px;
+  letter-spacing: -1.2px;
+}
+
+#form-start .primary {
+  margin-top: auto;
+}
+
+.home-card .or {
+  margin-top: var(--spacing-16);
+}
+
+.home-card.is-off {
+  opacity: 0.58;
+}
+
+.home-card.is-off input,
+.home-card.is-off button,
+.home-card.is-off .drop {
+  pointer-events: none;
+}
+
 .lead {
   max-width: 40rem;
   margin: 0;
@@ -247,6 +297,10 @@ label {
   color: var(--color-stone);
 }
 
+input[hidden] {
+  display: none !important;
+}
+
 input, select {
   display: block;
   width: 100%;
@@ -286,6 +340,13 @@ button.primary {
 
 button.primary:hover { background: #000000; }
 button.primary:active { transform: translateY(1px); }
+button.primary:disabled,
+button.ghost:disabled,
+#export-gpu:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
 
 .or {
   text-align: center;
@@ -822,6 +883,16 @@ button.primary:active { transform: translateY(1px); }
   .context-stage { max-height: 30vh; }
   .tile-stage img,
   .context-stage img { max-height: 28vh; }
+}
+
+@media (max-width: 960px) {
+  .home-cards,
+  .home-name {
+    grid-template-columns: 1fr;
+  }
+  .home-card {
+    min-height: 0;
+  }
 }
 
 @media (max-width: 860px) {

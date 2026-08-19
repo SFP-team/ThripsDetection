@@ -22,6 +22,7 @@
         <button type="button" data-go="review">Review</button>
         <button type="button" data-go="load">Home</button>
         <a id="export-link" class="ghost" href="#">Export CSV</a>
+        <button type="button" id="export-gpu" class="ghost" hidden>Export to GPU</button>
       </nav>
     </header>
 
@@ -30,43 +31,63 @@
         <div>
           <p class="eyebrow">Blueberry Breeding Program</p>
           <h1>Tiles annotator for thrips detection</h1>
-          <p class="lead">Upload a folder of leaf tiles to start a session. Marks stay in that session on this computer. Close and come back: you continue the same session. A new folder starts a new session.</p>
+          <p class="lead">Type your name once. Continue a session on this computer, upload tiles already cut, or send rover photos to the GPU. The GPU cuts the tiles and sends them back. You label only here.</p>
         </div>
       </div>
 
-      <form id="form-start" class="panel">
-        <p class="panel-kicker">Continue</p>
-        <h2>Open the last session</h2>
-        <p id="home-status">No session yet. Upload a folder below.</p>
+      <div class="home-name">
         <label>Your name
           <input id="annotator" name="annotator" autocomplete="nickname" required placeholder="First name">
         </label>
-        <button type="submit" class="primary" id="start-btn">Continue last session</button>
-      </form>
+        <label>Session name
+          <input id="session-name" placeholder="Field day 19 Aug">
+        </label>
+      </div>
+
+      <div class="home-cards">
+        <form id="form-start" class="panel home-card">
+          <p class="panel-kicker">Continue</p>
+          <h2>Last session</h2>
+          <p id="home-status">No session yet. Start from local tiles or GPU photos.</p>
+          <button type="submit" class="primary" id="start-btn">Continue last session</button>
+        </form>
+
+        <form id="form-session" class="panel home-card">
+          <p class="panel-kicker">Local tiles</p>
+          <h2>Already tiled</h2>
+          <p>Need tiles_foliage.csv and foliage tiles. Not raw rover photos.</p>
+          <label>Folder path on this computer
+            <input id="session-path" placeholder="/path/to/birefnet_tiles">
+          </label>
+          <button type="submit" class="primary" id="session-path-btn">Start from that path</button>
+          <p class="or">or</p>
+          <label class="drop" id="drop-zone">
+            <input id="folder-input" type="file" webkitdirectory directory multiple hidden>
+            Drop a tiled folder here, or click to choose one
+          </label>
+        </form>
+
+        <form id="form-gpu" class="panel home-card">
+          <p class="panel-kicker">GPU photos</p>
+          <h2>Raw photos</h2>
+          <p id="gpu-hint">This computer sends JPGs to the GPU. Tiles come back. Then you label here.</p>
+          <label>Folder path of raw photos
+            <input id="gpu-path" placeholder="/path/to/rover/photos">
+          </label>
+          <button type="submit" class="primary" id="gpu-path-btn">Send to GPU</button>
+          <p class="or">or</p>
+          <label class="drop" id="gpu-drop-zone">
+            <input id="gpu-folder-input" type="file" webkitdirectory directory multiple hidden>
+            Drop raw photos here, or click to choose them
+          </label>
+        </form>
+      </div>
 
       <div id="session-list" class="panel" hidden>
         <p class="panel-kicker">Sessions on this computer</p>
         <h2>Pick a session</h2>
         <ul id="batches"></ul>
       </div>
-
-      <form id="form-session" class="panel">
-        <p class="panel-kicker">New session</p>
-        <h2>Upload a folder of tiles</h2>
-        <p>The app copies that folder into this computer. Then you label. Need the tiled folder (tiles_foliage.csv and foliage tiles), not only raw rover photos.</p>
-        <label>Session name
-          <input id="session-name" placeholder="Field day 19 Aug">
-        </label>
-        <label>Or a folder path on this computer
-          <input id="session-path" placeholder="/path/to/birefnet_tiles">
-        </label>
-        <button type="submit" class="primary" id="session-path-btn">Start from that path</button>
-        <p class="or">or</p>
-        <label class="drop" id="drop-zone">
-          <input id="folder-input" type="file" webkitdirectory directory multiple hidden>
-          Drop a folder here, or click to choose one
-        </label>
-      </form>
     </section>
 
     <section id="screen-progress" class="screen" hidden>
@@ -75,6 +96,7 @@
         <h2 id="progress-title">Opening tiles</h2>
         <p id="progress-detail">Starting…</p>
         <ol class="steps">
+          <li data-step="sending">Sending photos to the GPU</li>
           <li data-step="finding">Finding the plant</li>
           <li data-step="cutting">Cutting it out of the background</li>
           <li data-step="leaves">Keeping only leaf squares</li>

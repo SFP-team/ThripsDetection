@@ -27,7 +27,7 @@ python -m annotator --port 8765
 
 Open [http://127.0.0.1:8765](http://127.0.0.1:8765).
 
-1. Type your name. Upload a tiled folder to start a session, or continue the last one. Work stays in `annotator/data/sessions/`.
+1. Type your name. Continue a session, upload a tiled folder, or (if this computer has a local settings file) send raw photos to the GPU. Work stays in `annotator/data/sessions/`.
 2. For each square: **new growth / old leaves / not a leaf**. Old leaves and not a leaf save as skip.
 3. If new growth: **healthy / injured / skip**, then **curl yes / no**.
 4. Mixed new growth = injured. Lime crinkle with no bronze or cup = healthy. No 1–5 on a square.

@@ -29,6 +29,7 @@ class Settings:
     local_python: str = "python3"
     device: str = "cuda:0"
     fold: int = 0
+    annotator_slot: str = "annotator_1"
 
 
 def _apply_env(settings: Settings) -> Settings:
@@ -46,6 +47,7 @@ def _apply_env(settings: Settings) -> Settings:
         "ANNOTATOR_LOCAL_PROJECT": "local_project",
         "ANNOTATOR_LOCAL_PYTHON": "local_python",
         "ANNOTATOR_DEVICE": "device",
+        "ANNOTATOR_SLOT": "annotator_slot",
     }
     for env_name, field_name in mapping.items():
         value = os.environ.get(env_name)
@@ -57,7 +59,23 @@ def _apply_env(settings: Settings) -> Settings:
     return settings
 
 
+def _load_dotenv() -> None:
+    for path in (REPO / ".env", DATA / ".env"):
+        if not path.exists():
+            continue
+        for raw in path.read_text().splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip("'").strip('"')
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
 def load_settings() -> Settings:
+    _load_dotenv()
     settings = Settings()
     if SETTINGS_PATH.exists():
         raw = json.loads(SETTINGS_PATH.read_text())
@@ -78,4 +96,9 @@ def public_settings(settings: Settings) -> dict:
     payload = asdict(settings)
     payload.pop("ssh_password", None)
     payload["ssh_password_set"] = bool(settings.ssh_password)
+    payload["gpu_ready"] = bool(settings.ssh_host and settings.ssh_user and settings.ssh_password)
     return payload
+
+
+def annotator_remote_root(settings: Settings) -> str:
+    return f"{settings.remote_work.rstrip('/')}/{settings.annotator_slot or 'annotator_1'}"

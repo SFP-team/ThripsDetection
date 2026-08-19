@@ -443,7 +443,7 @@ def _ssh_client(settings: Settings) -> Any:
         raise RuntimeError("GPU server host is not set.")
     if not settings.ssh_password:
         raise RuntimeError(
-            "GPU password is missing. Open Server settings, save the password, then try again."
+            "GPU password is missing. Add settings.json or .env on this computer."
         )
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())

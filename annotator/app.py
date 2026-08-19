@@ -15,7 +15,6 @@ from pydantic import BaseModel, Field
 from annotator.config import DATA, ROOT, load_settings, public_settings
 from annotator.db import (
     add_label,
-    export_rows,
     find_ready_batch,
     get_batch,
     get_tile,
@@ -28,13 +27,15 @@ from annotator.db import (
     set_batch_annotator,
     undo_label,
 )
+from annotator.export_merge import EXPORT_FIELDS
+from annotator.gpu_jobs import export_batch_to_gpu, start_gpu_session, start_gpu_session_from_upload
 from annotator.pipeline import get_job, start_import
 from annotator.sessions import (
     ensure_legacy_sessions,
     list_sessions,
-    session_export_folder,
     start_session_from_dir,
     start_session_from_upload,
+    write_local_export,
 )
 
 STATIC = ROOT / "static"
@@ -96,6 +97,18 @@ class SessionPathIn(BaseModel):
     annotator: str = Field(min_length=1)
     name: str = ""
     path: str = Field(min_length=1)
+
+
+class SessionGpuIn(BaseModel):
+    annotator: str = Field(min_length=1)
+    name: str = ""
+    path: str = Field(min_length=1)
+
+
+def _require_gpu() -> None:
+    settings = load_settings()
+    if not settings.ssh_host or not settings.ssh_user or not settings.ssh_password:
+        raise HTTPException(400, "GPU password is missing. Add settings.json or .env on this computer.")
 
 
 @app.on_event("startup")
@@ -185,6 +198,39 @@ async def api_session_upload(
         raise HTTPException(400, "Choose a folder of tiles.")
     try:
         return start_session_from_upload(annotator, name, payload)
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/sessions/gpu")
+def api_session_gpu(body: SessionGpuIn) -> dict[str, Any]:
+    _require_gpu()
+    try:
+        return start_gpu_session(body.annotator, body.name, body.path)
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/sessions/gpu-upload")
+async def api_session_gpu_upload(
+    annotator: str = Form(...),
+    name: str = Form(""),
+    files: list[UploadFile] = File(...),
+    relpaths: list[str] | None = Form(None),
+) -> dict[str, Any]:
+    _require_gpu()
+    paths = relpaths if isinstance(relpaths, list) else ([relpaths] if relpaths else [])
+    payload: list[tuple[str, bytes]] = []
+    for index, upload in enumerate(files):
+        filename = Path(upload.filename or "").name
+        if not filename:
+            continue
+        rel = paths[index] if index < len(paths) else filename
+        payload.append((rel, await upload.read()))
+    if not payload:
+        raise HTTPException(400, "Choose a folder of raw photos.")
+    try:
+        return start_gpu_session_from_upload(annotator, name, payload)
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -302,41 +348,11 @@ def api_undo(body: UndoIn) -> dict[str, Any]:
 
 @app.get("/api/batches/{batch_id}/export")
 def api_export(batch_id: int) -> StreamingResponse:
-    batch = get_batch(batch_id)
-    if batch is None:
+    if get_batch(batch_id) is None:
         raise HTTPException(404, "Batch not found")
-    rows = export_rows(batch_id)
-    folder = session_export_folder(batch_id)
-    csv_path = folder / "labels.csv"
-    fieldnames = [
-        "image",
-        "tile",
-        "rel_y",
-        "tissue",
-        "injury",
-        "curl",
-        "label",
-        "annotator",
-        "labeled_at",
-    ]
-    with csv_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-    counts = batch["counts"]
-    (folder / "progress.json").write_text(
-        json.dumps(
-            {
-                "batch_id": batch_id,
-                "name": batch["name"],
-                **counts,
-            },
-            indent=2,
-        )
-        + "\n"
-    )
+    _csv_path, rows = write_local_export(batch_id)
     buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+    writer = csv.DictWriter(buffer, fieldnames=EXPORT_FIELDS, extrasaction="ignore")
     writer.writeheader()
     writer.writerows(rows)
     data = buffer.getvalue().encode("utf-8")
@@ -346,6 +362,17 @@ def api_export(batch_id: int) -> StreamingResponse:
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.post("/api/batches/{batch_id}/export-gpu")
+def api_export_gpu(batch_id: int) -> dict[str, Any]:
+    if get_batch(batch_id) is None:
+        raise HTTPException(404, "Batch not found")
+    _require_gpu()
+    try:
+        return export_batch_to_gpu(batch_id)
+    except (FileNotFoundError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/media/tile/{tile_id}")

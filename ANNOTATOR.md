@@ -23,9 +23,13 @@ Windows: `python -m venv .venv` then `.venv\Scripts\activate`.
 
 Open http://127.0.0.1:8765
 
-Copy the tiled folder from the server onto this computer. On home: type your name, then drop that folder, pick it, or paste its path.
+On home: type your name once, then pick a card.
 
-The folder must already be tiled (`tiles_foliage.csv` plus the leaf squares). Raw rover photos alone will not start a session.
+- **Continue** opens the last session on this computer.
+- **Local tiles** needs a folder that is already tiled (`tiles_foliage.csv` plus the leaf squares).
+- **GPU photos** sends raw rover JPGs to the GPU, waits for leaf tiles, then starts a local session. That card stays off until this computer has a local settings file.
+
+Raw rover photos alone will not start a Local tiles session.
 
 ## After a UI or code change
 
@@ -53,13 +57,27 @@ Close the browser whenever you want. Open the same address. You return to the sa
 
 Home lists every session on this computer.
 
+## GPU photos (optional)
+
+If this computer has a local `annotator/data/settings.json` or `.env` (handed to you, never committed):
+
+1. Type your name.
+2. Use the GPU photos card. Drop raw rover JPGs, or paste their folder path.
+3. The app sends them to the GPU, waits for leaf tiles, then starts a session here.
+4. Label only on this computer. The GPU is not used while you label.
+5. Export CSV always writes locally. **Export to GPU** is a second button. It adds new `(image, tile)` rows and does not overwrite marks already on the GPU. If the images do not overlap, it writes a new folder.
+
+If the GPU card is greyed out, this computer has no password. Use Local tiles instead.
+
+GPU work lands in `annotator_jobs/annotator_1/` on the server: `jobs/` for one segment run, `exports/` only when someone presses Export to GPU.
+
 ## Export / send back
 
 Export CSV writes into that session folder:
 
 `annotator/data/sessions/<session>/exports/labels.csv`
 
-Copy that CSV (or the whole session folder) back onto the GPU. Do not `git add` or `git push` labels, photos, or settings.
+Copy that CSV back by hand, or use Export to GPU if this computer has settings. Do not `git add` or `git push` labels, photos, or settings.
 
 ## Do not
 

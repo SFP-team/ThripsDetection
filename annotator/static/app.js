@@ -109,6 +109,7 @@ function show(screen, replace = false) {
   if (state.batch) {
     $("export-link").href = `/api/batches/${state.batch.id}/export`;
   }
+  paintGpuControls();
   persist(replace);
 }
 
@@ -199,12 +200,13 @@ function setProgress(step, title, detail) {
   $("progress-detail").textContent = detail || "";
   for (const item of document.querySelectorAll(".steps li")) {
     item.classList.toggle("active", item.dataset.step === step);
-    const order = ["finding", "cutting", "leaves", "copying", "ready"];
+    const order = ["sending", "finding", "cutting", "leaves", "copying", "ready"];
     item.classList.toggle("done", order.indexOf(item.dataset.step) < order.indexOf(step));
   }
 }
 
 const STEP_TITLES = {
+  sending: "Sending photos to the GPU",
   finding: "Finding the plant",
   cutting: "Cutting it out of the background",
   leaves: "Keeping only leaf squares",
@@ -453,9 +455,33 @@ async function renderReview() {
   }
 }
 
+function gpuReady() {
+  return Boolean(state.settings?.gpu_ready);
+}
+
+function paintGpuControls() {
+  const ready = gpuReady();
+  const card = $("form-gpu");
+  if (card) {
+    card.classList.toggle("is-off", !ready);
+    $("gpu-path-btn").disabled = !ready;
+    $("gpu-path").disabled = !ready;
+    $("gpu-folder-input").disabled = !ready;
+    $("gpu-hint").textContent = ready
+      ? "This computer sends JPGs to the GPU. Tiles come back. Then you label here."
+      : "GPU password is not set on this computer. Ask for a local settings file.";
+  }
+  const exportGpu = $("export-gpu");
+  if (exportGpu) {
+    exportGpu.hidden = !ready || !state.batch || state.screen === "progress" || state.screen === "load";
+    exportGpu.disabled = !ready || !state.batch;
+  }
+}
+
 async function loadSettings() {
   state.settings = await api("/api/settings");
   $("annotator").value = localStorage.getItem(NAME_KEY) || "";
+  paintGpuControls();
 }
 
 async function loadSessions() {
@@ -463,7 +489,7 @@ async function loadSessions() {
   $("session-list").hidden = sessions.length === 0;
   $("start-btn").disabled = sessions.length === 0;
   if (!sessions.length) {
-    $("home-status").textContent = "No session yet. Upload a folder below.";
+    $("home-status").textContent = "No session yet. Start from local tiles or GPU photos.";
     $("batches").innerHTML = "";
     return sessions;
   }
@@ -491,9 +517,11 @@ async function startWork(tileId = null, options = {}) {
     return;
   }
   const remembered = readSession();
-  const batchId = options.batchId || remembered?.batchId || sessions[0].batch_id;
+  const batchId = options.batchId || sessions[0].batch_id;
   const known = sessions.some((item) => item.batch_id === batchId);
-  await openBatch(known ? batchId : sessions[0].batch_id, tileId, options);
+  const resumeTile =
+    remembered?.batchId === batchId ? tileId || remembered.tileId : tileId;
+  await openBatch(known ? batchId : sessions[0].batch_id, resumeTile, options);
 }
 
 async function createSessionFromPath() {
@@ -547,6 +575,75 @@ async function createSessionFromFiles(fileList) {
   }
   const job = await response.json();
   await openBatch(job.batch_id);
+}
+
+async function createGpuSessionFromPath() {
+  const name = requireName();
+  if (!name) return;
+  if (!gpuReady()) {
+    flash({ message: "GPU password is not set on this computer." });
+    return;
+  }
+  const path = $("gpu-path").value.trim();
+  if (!path) {
+    flash({ message: "Choose raw photos or paste a folder path." });
+    return;
+  }
+  const job = await api("/api/sessions/gpu", {
+    method: "POST",
+    body: JSON.stringify({
+      annotator: name,
+      name: $("session-name").value.trim(),
+      path,
+    }),
+  });
+  await watchJob(job.job_id);
+}
+
+async function createGpuSessionFromFiles(fileList) {
+  const name = requireName();
+  if (!name) return;
+  if (!gpuReady()) {
+    flash({ message: "GPU password is not set on this computer." });
+    return;
+  }
+  const files = [...fileList];
+  if (!files.length) {
+    flash({ message: "Choose a folder of raw photos." });
+    return;
+  }
+  const data = new FormData();
+  data.append("annotator", name);
+  data.append("name", $("session-name").value.trim() || files[0].webkitRelativePath.split("/")[0] || "");
+  for (const file of files) {
+    data.append("files", file);
+    data.append("relpaths", file.webkitRelativePath || file.name);
+  }
+  show("progress", true);
+  setProgress("sending", "Sending photos to the GPU", `${files.length} files`);
+  const response = await fetch("/api/sessions/gpu-upload", { method: "POST", body: data });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body.detail || JSON.stringify(body);
+    } catch {
+      detail = await response.text();
+    }
+    throw new Error(detail);
+  }
+  const job = await response.json();
+  await watchJob(job.job_id);
+}
+
+async function exportToGpu() {
+  if (!state.batch) return;
+  if (!gpuReady()) {
+    flash({ message: "GPU password is not set on this computer." });
+    return;
+  }
+  const result = await api(`/api/batches/${state.batch.id}/export-gpu`, { method: "POST" });
+  flash({ message: result.detail || "Export sent to the GPU." });
 }
 
 async function filesFromDrop(event) {
@@ -619,6 +716,52 @@ $("drop-zone").addEventListener("drop", async (event) => {
   } catch (error) {
     flash(error);
     show("load");
+  }
+});
+
+$("form-gpu").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await createGpuSessionFromPath();
+  } catch (error) {
+    flash(error);
+    show("load");
+  }
+});
+
+$("gpu-folder-input").addEventListener("change", async (event) => {
+  try {
+    await createGpuSessionFromFiles(event.target.files);
+  } catch (error) {
+    flash(error);
+    show("load");
+  }
+});
+
+$("gpu-drop-zone").addEventListener("dragover", (event) => {
+  event.preventDefault();
+  $("gpu-drop-zone").classList.add("is-over");
+});
+$("gpu-drop-zone").addEventListener("dragleave", () => {
+  $("gpu-drop-zone").classList.remove("is-over");
+});
+$("gpu-drop-zone").addEventListener("drop", async (event) => {
+  event.preventDefault();
+  $("gpu-drop-zone").classList.remove("is-over");
+  try {
+    const files = await filesFromDrop(event);
+    await createGpuSessionFromFiles(files);
+  } catch (error) {
+    flash(error);
+    show("load");
+  }
+});
+
+$("export-gpu").addEventListener("click", async () => {
+  try {
+    await exportToGpu();
+  } catch (error) {
+    flash(error);
   }
 });
 
@@ -723,26 +866,22 @@ window.addEventListener("popstate", () => {
   boot({ fromHistory: true }).catch(flash);
 });
 
-async function boot(options = {}) {
+async function boot() {
   await loadSettings();
   const sessions = await loadSessions();
-  const ready = sessions[0];
   const located = parseLocation();
-  const session = readSession();
-  const target = options.fromHistory ? located : located || session;
-  if (target?.batchId && ready) {
-    const known = sessions.some((item) => item.batch_id === target.batchId);
-    const batchId = known ? target.batchId : ready.batch_id;
-    const tileId = known ? target.tileId : null;
-    state.plantFilter = target.plantFilter || session?.plantFilter || "";
-    if (target.screen === "review") {
+  const known = sessions.find((item) => item.batch_id === located?.batchId);
+  if (located && known) {
+    const session = readSession();
+    state.plantFilter = located.plantFilter || session?.plantFilter || "";
+    if (located.screen === "review") {
       state.fromReview = false;
-      state.batch = await api(`/api/batches/${batchId}`);
+      state.batch = await api(`/api/batches/${located.batchId}`);
       show("review", true);
       await renderReview();
       return;
     }
-    await openBatch(batchId, tileId, {
+    await openBatch(located.batchId, located.tileId, {
       replace: true,
       fromReview: Boolean(session?.fromReview),
     });

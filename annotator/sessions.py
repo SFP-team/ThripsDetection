@@ -7,14 +7,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import csv
+
 from annotator.config import DATA
 from annotator.db import (
     create_batch,
+    export_rows,
     get_batch,
     list_batches,
     set_batch_session_key,
     set_batch_status,
 )
+from annotator.export_merge import EXPORT_FIELDS
 from annotator.pipeline import ingest_run
 
 SESSIONS = DATA / "sessions"
@@ -126,7 +130,7 @@ def start_session_from_upload(
     label = name.strip() or (Path(files[0][0]).parts[0] if files else "Session")
     key = make_key(label)
     incoming = save_uploaded_folder(key, files)
-    return _finish_session(annotator, label, key, incoming)
+    return finish_tile_session(annotator, label, key, incoming)
 
 
 def start_session_from_dir(annotator: str, name: str, folder: Path) -> dict[str, Any]:
@@ -141,12 +145,12 @@ def start_session_from_dir(annotator: str, name: str, folder: Path) -> dict[str,
     if incoming.exists():
         shutil.rmtree(incoming)
     shutil.copytree(run_dir, incoming)
-    return _finish_session(annotator, label, key, incoming)
+    return finish_tile_session(annotator, label, key, incoming)
 
 
-def _finish_session(annotator: str, label: str, key: str, run_root: Path) -> dict[str, Any]:
+def finish_tile_session(annotator: str, label: str, key: str, run_root: Path, source: str = "upload") -> dict[str, Any]:
     run_dir = find_tile_run(run_root)
-    batch_id = create_batch(label, annotator, source="session", status="preparing", session_key=key)
+    batch_id = create_batch(label, annotator, source=source or "session", status="preparing", session_key=key)
     try:
         count = ingest_run(batch_id, run_dir)
         if count == 0:
@@ -163,7 +167,7 @@ def _finish_session(annotator: str, label: str, key: str, run_root: Path) -> dic
             "annotator": annotator,
             "created_at": now_iso(),
             "tiles": count,
-            "source": "upload",
+            "source": source,
         },
     )
     set_last_session(key, batch_id)
@@ -223,3 +227,20 @@ def session_export_folder(batch_id: int) -> Path:
             },
         )
     return export_dir(key)
+
+
+def write_local_export(batch_id: int) -> tuple[Path, list[dict[str, Any]]]:
+    batch = get_batch(batch_id)
+    if batch is None:
+        raise FileNotFoundError(f"Batch {batch_id} not found")
+    rows = export_rows(batch_id)
+    folder = session_export_folder(batch_id)
+    csv_path = folder / "labels.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=EXPORT_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    (folder / "progress.json").write_text(
+        json.dumps({"batch_id": batch_id, "name": batch["name"], **batch["counts"]}, indent=2) + "\n"
+    )
+    return csv_path, rows
