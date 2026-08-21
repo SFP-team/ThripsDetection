@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tile marking examples for annotators</title>
+  <style>
+    :root {
+      --paper: #fafafa;
+      --ink: #171717;
+      --mute: #666;
+      --line: #ebebeb;
+      --flush-h: #1d6b3a;
+      --flush-i: #9a2b1f;
+      --mature: #5b4a2a;
+      --tube: #555;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: #333;
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      padding: 32px 24px 16px;
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; font-weight: 500; color: var(--ink); letter-spacing: -0.5px; }
+    h2 { margin: 0 0 8px; font-size: 24px; font-weight: 500; color: var(--ink); }
+    .lead, .note { color: var(--mute); max-width: 46rem; }
+    .note { background: #fff; padding: 14px 16px; border-radius: 6px; box-shadow: 0 0 0 1px var(--line); margin: 16px 0; }
+    nav { display: flex; gap: 8px; flex-wrap: wrap; margin: 20px 0; }
+    nav a {
+      color: var(--ink);
+      text-decoration: none;
+      padding: 8px 12px;
+      background: #fff;
+      box-shadow: 0 0 0 1px var(--line);
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    .rules {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 20px 0 8px;
+    }
+    .rules article {
+      background: #fff;
+      padding: 14px 16px;
+      border-radius: 6px;
+      box-shadow: 0 0 0 1px var(--line);
+    }
+    .rules h3 { margin: 0 0 8px; font-size: 15px; }
+    .rules p { margin: 0; font-size: 14px; color: #444; }
+    .plant { max-width: 1120px; margin: 0 auto; padding: 24px; }
+    .hero {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 20px;
+      align-items: start;
+      margin-bottom: 20px;
+    }
+    .hero img {
+      width: 220px;
+      height: auto;
+      border-radius: 6px;
+      box-shadow: 0 0 0 1px var(--line);
+      background: #fff;
+    }
+    .tiles {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 6px;
+      box-shadow: 0 0 0 1px var(--line);
+      overflow: hidden;
+    }
+    .card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+    .card .body { padding: 12px 14px 16px; }
+    .meta { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: #888; margin: 0 0 8px; }
+    .badge {
+      display: inline-block;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 4px;
+      margin: 0 6px 8px 0;
+    }
+    .flush-healthy { background: #e5f4ea; color: var(--flush-h); }
+    .flush-injured { background: #fde8e4; color: var(--flush-i); }
+    .flush-skip { background: #eee; color: #444; }
+    .mature { background: #f3ead8; color: var(--mature); }
+    .tube { background: #ececec; color: var(--tube); }
+    .curl { font-size: 13px; color: #444; }
+    .why { margin: 8px 0 0; font-size: 14px; color: #333; }
+    footer { max-width: 1120px; margin: 0 auto; padding: 8px 24px 48px; color: #888; font-size: 13px; }
+    @media (max-width: 720px) {
+      .rules, .hero { grid-template-columns: 1fr; }
+      .hero img { width: 160px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>What to mark on a square</h1>
+    <p class="lead">Three real plants from the 36-photo set. Each square below is a teaching call using the protocol. You are not scoring the plant 1 to 5. Look at the square. Use the whole plant only to see if you are at the top (usually new growth) or lower (usually old leaves).</p>
+    <div class="rules">
+      <article>
+        <h3>New growth</h3>
+        <p>Soft young leaves at the top. Often lime, pale, or silver. Only these get healthy / injured / curl. Pale silver tips are still new growth.</p>
+      </article>
+      <article>
+        <h3>Old leaves</h3>
+        <p>Thicker, darker, mid or lower canopy. Even if bronze, spotted, or curled: mark Old leaves and stop. That damage is not in the plant score.</p>
+      </article>
+      <article>
+        <h3>Not a leaf</h3>
+        <p>Tube, pot, tag, sky, dirt, empty blur. A little leaf on the tube is still Not a leaf if you cannot judge the flush.</p>
+      </article>
+    </div>
+    <p class="note"><strong>Mixed young flush is injured.</strong> If part of the young leaves is hurt and part is clean, mark injured. Lime crinkle with no bronze and no cup is healthy. Curl is shape, not color. Injured and flat is still injured.</p>
+    <nav>
+      <a href="#p0357">Plant 0357 · cleaner</a>
+      <a href="#p0338">Plant 0338 · some tip damage</a>
+      <a href="#p0329">Plant 0329 · harder-hit tips</a>
+    </nav>
+  </header>
+
+  <section class="plant" id="p0357">
+    <div class="hero">
+      <img src="crops/IMG_0357_plant.jpg" alt="Whole plant IMG_0357">
+      <div>
+        <h2>IMG_0357 · a cleaner plant</h2>
+        <p class="lead">The lime crown is new growth and looks mostly clean. The dark body is old leaves. A reddish cluster just above the tube is still old tissue. Do not mark that cluster injured. A scout whole-plant score on this photo was 1. That is context only. Do not put a 1 on a square.</p>
+      </div>
+    </div>
+    <div class="tiles" id="tiles-0357"></div>
+  </section>
+
+  <section class="plant" id="p0338">
+    <div class="hero">
+      <img src="crops/IMG_0338_plant.jpg" alt="Whole plant IMG_0338">
+      <div>
+        <h2>IMG_0338 · damaged tips, clean old canopy</h2>
+        <p class="lead">The pale twisted tips are new growth and injured. The dark mid and lower leaves are old. Score the tip. Do not chase injury down into the old canopy. A scout score on this photo was 2. Context only.</p>
+      </div>
+    </div>
+    <div class="tiles" id="tiles-0338"></div>
+  </section>
+
+  <section class="plant" id="p0329">
+    <div class="hero">
+      <img src="crops/IMG_0329_plant.jpg" alt="Whole plant IMG_0329">
+      <div>
+        <h2>IMG_0329 · harder-hit young tips</h2>
+        <p class="lead">The bunched, bronzed tips are new growth, injured, curl yes. The large dark leaves under them are old. The dead brown leaf by the tube is old, not a flush injured mark. A scout score on this photo was 4. Context only. You still do not put a 4 on a square.</p>
+      </div>
+    </div>
+    <div class="tiles" id="tiles-0329"></div>
+  </section>
+
+  <footer>Teaching examples from the tiled 36-plant run. Open this file in a browser: protocol-examples/index.html</footer>
+
+  <script>
+    const PLANTS = {
+      "0357": [
+        {"tile":"IMG_0357_x1397_y1067.jpg","rel_y":0.0,"tissue":"flush","injury":"healthy","curl":"no","reason":"Top of the plant against sky. Soft lime tips and thin stems, not dark leathery canopy. Surfaces are clean lime. Bright patches are sun glare, not bronze. Blades are mostly flat, so curl is no."},
+        {"tile":"IMG_0357_x1781_y1067.jpg","rel_y":0.0,"tissue":"flush","injury":"healthy","curl":"yes","reason":"Same top row, lime young tips. Color is clean lime with no bronze or metallic scrape. One young tip is hooked or cupped, so curl is yes. Lime crinkle or a hooked tip with no bronze stays healthy."},
+        {"tile":"IMG_0357_x1013_y1451.jpg","rel_y":0.124,"tissue":"flush","injury":"healthy","curl":"no","reason":"Upper-left canopy just below the tips. Readable leaves are pale lime and soft. Sky is only in the corner. No bronze, silver, or thrips cup. Blades are open and flat."},
+        {"tile":"IMG_0357_x1397_y1451.jpg","rel_y":0.124,"tissue":"flush","injury":"healthy","curl":"yes","reason":"Upper-center still carries the lime top flush. Darker leaves at the bottom do not change the call because the young patch is large enough to judge. Flush is clean lime. Several young blades cup or twist, so curl is yes on healthy lime crinkle."},
+        {"tile":"IMG_0357_x1781_y1451.jpg","rel_y":0.124,"tissue":"flush","injury":"healthy","curl":"no","reason":"Upper-right is still the lime top, with some darker leaves lower in the square. Judge the young flush: clean lime, no bronze, no cup. Those young blades lie flat."},
+        {"tile":"IMG_0357_x2096_y1451.jpg","rel_y":0.124,"tissue":"flush","injury":"healthy","curl":"no","reason":"Outer upper-right shoot of pale lime leaves. Soft young tissue, not hardened mid-canopy. No bronze or tight cup. Glare is not injury."},
+        {"tile":"IMG_0357_x1013_y1835.jpg","rel_y":0.247,"tissue":"flush","injury":"healthy","curl":"no","reason":"Left mid canopy mixes lime shoot tips with darker leaves below. The young patch is real and readable, so this is new growth, not old leaves. That flush is clean lime and mostly flat."},
+        {"tile":"IMG_0357_x1397_y1835.jpg","rel_y":0.247,"tissue":"mature","injury":"skip","curl":null,"reason":"Center of the mid canopy. Packed with thick, dark, leathery leaves. This is hardened older foliage, not the soft lime top. Old leaves stop at skip. Do not score spots or wear."},
+        {"tile":"IMG_0357_x1781_y1835.jpg","rel_y":0.247,"tissue":"flush","injury":"healthy","curl":"no","reason":"Dark canopy on the left and a rising lime shoot on the right. That young shoot is large enough to judge, so call new growth. The lime leaves are clean and flat."},
+        {"tile":"IMG_0357_x2096_y1835.jpg","rel_y":0.247,"tissue":"flush","injury":"healthy","curl":"yes","reason":"Outer mid-right branch of bright lime leaves. The white tube is only blur behind. Color is clean lime. Several young blades are wavy or crinkled, so healthy with curl yes."},
+        {"tile":"IMG_0357_x1013_y2219.jpg","rel_y":0.371,"tissue":"mature","injury":"skip","curl":null,"reason":"Lower-left canopy just above the tube. Dark thick leaves and mulch. Almost no lime. Old leaves get skip, not injury."},
+        {"tile":"IMG_0357_x1397_y2219.jpg","rel_y":0.371,"tissue":"mature","injury":"skip","curl":null,"reason":"Lower-center, very dark leathery canopy. This is the older mid-plant body, not the lime crown. Mark old leaves and stop."},
+        {"tile":"IMG_0357_x1781_y2219.jpg","rel_y":0.371,"tissue":"mature","injury":"skip","curl":null,"reason":"Lower-right, just above the tube. Dark canopy plus a reddish-brown cluster. Those red leaves sit in the old zone. Do not mark old bronze or red as injured flush."},
+        {"tile":"IMG_0357_x2096_y2219.jpg","rel_y":0.371,"tissue":"flush","injury":"healthy","curl":"no","reason":"Outer lower-right stem still shows a readable run of pale lime leaves. Mixed square, but the young shoot can be judged, so new growth. That flush is clean and mostly flat. Ignore spots on the old leaves."}
+      ],
+      "0338": [
+        {"tile":"IMG_0338_x1431_y747.jpg","rel_y":0.0,"tissue":"flush","injury":"injured","curl":"yes","reason":"Tallest stem tip against the sky. Soft pale lime leaves are tightly cupped and twisted, with bronze-brown dead edges. That is injured new growth, not old canopy. Curl is yes because the blades are cupped."},
+        {"tile":"IMG_0338_x1047_y1131.jpg","rel_y":0.111,"tissue":"flush","injury":"healthy","curl":"no","reason":"Left-hand stem tip: a small lime cluster you can still judge, with darker leaves behind it. No bronze, silver, or thrips cup on that young patch. New growth, healthy, curl no. Do not call the square old leaves just because some hardened blades sit around the tip."},
+        {"tile":"IMG_0338_x1431_y1131.jpg","rel_y":0.111,"tissue":"flush","injury":"injured","curl":"yes","reason":"Center column just under the damaged apical tip. Young blades show bronze and twisting. Mixed young tissue is injured. Curl is yes."},
+        {"tile":"IMG_0338_x1815_y1131.jpg","rel_y":0.111,"tissue":"flush","injury":"injured","curl":"yes","reason":"Right-hand stem tip. Soft lime flush is cupped and twisted with bronze or silver on the surface. This is the damaged right flush, not the dark mid-canopy."},
+        {"tile":"IMG_0338_x1866_y1131.jpg","rel_y":0.111,"tissue":"flush","injury":"injured","curl":"yes","reason":"Same right tip, shifted a few pixels. Pale lime flush still shows bronze and a tight cup. Same call as the square to its left."},
+        {"tile":"IMG_0338_x1047_y1515.jpg","rel_y":0.222,"tissue":"mature","injury":"skip","curl":null,"reason":"Left side below the left tip. Leaves are dark, thick, and leathery. No judgeable lime flush. Spotting on old blades is still old leaves."},
+        {"tile":"IMG_0338_x1431_y1515.jpg","rel_y":0.222,"tissue":"mature","injury":"skip","curl":null,"reason":"Center canopy under the pale tip. Bulk of the square is darker, thicker mid-stem foliage. A sliver of lighter green is not enough to score flush."},
+        {"tile":"IMG_0338_x1815_y1515.jpg","rel_y":0.222,"tissue":"flush","injury":"injured","curl":"yes","reason":"The right stem is shorter, so its pale tip still sits in this row. Judgeable lime flush is cupped and bronzed. Darker leaves on the neighboring stem do not change the call."},
+        {"tile":"IMG_0338_x1866_y1515.jpg","rel_y":0.222,"tissue":"flush","injury":"injured","curl":"yes","reason":"Same right-hand flush cluster. Soft lime blades with bronze or silver and tight curl. Score the young patch, not the mature leaves beside it."},
+        {"tile":"IMG_0338_x1047_y1899.jpg","rel_y":0.333,"tissue":"mature","injury":"skip","curl":null,"reason":"Left mid-canopy. Dark leathery blades. The grow tube is only in the distance. Position and thickness say old leaves."},
+        {"tile":"IMG_0338_x1431_y1899.jpg","rel_y":0.333,"tissue":"flush","injury":"injured","curl":"yes","reason":"A real lime cluster is still readable here, a leftover young shoot. Those blades are cupped or twisted and pale-silver. That is injured flush, not old-leaf wear."},
+        {"tile":"IMG_0338_x1815_y1899.jpg","rel_y":0.333,"tissue":"mature","injury":"skip","curl":null,"reason":"Right mid-canopy: thick dark leaves and the white tube in the background. If a tiny pale tip is present it is a sliver you cannot score."},
+        {"tile":"IMG_0338_x1866_y1899.jpg","rel_y":0.333,"tissue":"mature","injury":"skip","curl":null,"reason":"Same right-hand wood and dark leathery canopy. A cupped dark leaf is still old leaves."},
+        {"tile":"IMG_0338_x1047_y2283.jpg","rel_y":0.444,"tissue":"mature","injury":"skip","curl":null,"reason":"Lower-left canopy. Deep green, thick, flat old leaves. No pale soft flush. Old leaves stay skip even if spotted."},
+        {"tile":"IMG_0338_x1431_y2283.jpg","rel_y":0.444,"tissue":"mature","injury":"skip","curl":null,"reason":"Lower-center. Dense dark leathery leaves only. This is the old canopy under the flush zone."},
+        {"tile":"IMG_0338_x1815_y2283.jpg","rel_y":0.444,"tissue":"mature","injury":"skip","curl":null,"reason":"Lower-right woody stem, thick dark leaves, a dried brown scrap. No lime flush. Old leaves."},
+        {"tile":"IMG_0338_x1866_y2283.jpg","rel_y":0.444,"tissue":"mature","injury":"skip","curl":null,"reason":"Same lower-right stem. Dark leathery foliage and a dead brown leaf. Still old leaves. Never mark injured on old leaves."},
+        {"tile":"IMG_0338_x1431_y2667.jpg","rel_y":0.555,"tissue":"mature","injury":"skip","curl":null,"reason":"Lowest kept square: dark lower canopy on the rim of the white tube. Readable tissue is old leaves, so mark Old leaves, not Not a leaf. The tube is only the lower edge."}
+      ],
+      "0329": [
+        {"tile":"IMG_0329_x919_y1088.jpg","rel_y":0.0,"tissue":"flush","injury":"injured","curl":"yes","reason":"Top-left stem tip against sky. Soft lime flush is stunted, tightly twisted, and bronzed. Cup plus bronze on young tissue is injured. Curl is the twisted shape."},
+        {"tile":"IMG_0329_x1303_y1088.jpg","rel_y":0.0,"tissue":"flush","injury":"injured","curl":"yes","reason":"Highest tip on the plant. Terminals are cupped and carry rust-brown patches. Darker leaves sit lower in the square, but the young tip is a real patch you can judge, so keep New growth. Mixed flush is injured."},
+        {"tile":"IMG_0329_x1687_y1088.jpg","rel_y":0.0,"tissue":"flush","injury":"injured","curl":"yes","reason":"Right-center apical tip. Young leaves are stunted, tightly cupped or twisted, with brown spots. This is the damaged flush a scout would pinch, not old canopy."},
+        {"tile":"IMG_0329_x919_y1472.jpg","rel_y":0.125,"tissue":"mature","injury":"skip","curl":null,"reason":"Left canopy just under the tip. Readable leaves are thicker and darker. The soft apical cluster is the square above. Hardened outer canopy is Old leaves even on a harder-hit plant."},
+        {"tile":"IMG_0329_x1303_y1472.jpg","rel_y":0.125,"tissue":"flush","injury":"injured","curl":"yes","reason":"Transition square: dark leaves around a real pale tip that is cupped, twisted, and bronzed. If you can still judge that young patch, choose New growth. Mixed flush is injured."},
+        {"tile":"IMG_0329_x1687_y1472.jpg","rel_y":0.125,"tissue":"flush","injury":"injured","curl":"yes","reason":"A lime tip cluster is still in frame, with cupping and bronze on the young tissue. Do not send the square to Old leaves just because darker blades share the view."},
+        {"tile":"IMG_0329_x2012_y1472.jpg","rel_y":0.125,"tissue":"flush","injury":"injured","curl":"yes","reason":"Right side-branch tip. Obvious lime flush, cupped and twisted. A side tip is still New growth."},
+        {"tile":"IMG_0329_x919_y1856.jpg","rel_y":0.25,"tissue":"mature","injury":"skip","curl":null,"reason":"Mid-canopy left. Larger darker leaves. Mulch and the tube are only in the background. This is not a stem tip. Wear on old leaves is still Old leaves."},
+        {"tile":"IMG_0329_x1303_y1856.jpg","rel_y":0.25,"tissue":"mature","injury":"skip","curl":null,"reason":"Dense mid-canopy. Thick dark leathery leaves, mostly flat, no soft lime tip. Mid-canopy on this plant is Old leaves."},
+        {"tile":"IMG_0329_x1687_y1856.jpg","rel_y":0.25,"tissue":"mature","injury":"skip","curl":null,"reason":"Broad deep-green leaves under the tips. A brown patch or a slight wave on hardened leaves is not a flush injured mark."},
+        {"tile":"IMG_0329_x2012_y1856.jpg","rel_y":0.25,"tissue":"mature","injury":"skip","curl":null,"reason":"Right mid-canopy under the side tip already marked above. Readable tissue is the darker outer canopy. Do not chase the tip down into old leaves."},
+        {"tile":"IMG_0329_x1303_y2240.jpg","rel_y":0.376,"tissue":"mature","injury":"skip","curl":null,"reason":"Lower canopy over the tube. Dark mature leaves plus a dead brown shriveled leaf. That brown leaf is old dead tissue, not flush injured. Leaves still dominate, so this is Old leaves, not Not a leaf."},
+        {"tile":"IMG_0329_x1687_y2240.jpg","rel_y":0.376,"tissue":"mature","injury":"skip","curl":null,"reason":"Same lower band: thick dark leaves, another dead brown leaf. The tube is nearby but is not the readable content. Old leaves, skip."}
+      ]
+    };
+
+    function labelOf(item) {
+      if (item.tissue === "mature") return { cls: "mature", text: "Old leaves" };
+      if (item.tissue === "tube") return { cls: "tube", text: "Not a leaf" };
+      if (item.injury === "injured") return { cls: "flush-injured", text: "New growth · Injured" };
+      if (item.injury === "healthy") return { cls: "flush-healthy", text: "New growth · Healthy" };
+      return { cls: "flush-skip", text: "New growth · Skip" };
+    }
+
+    function render(id, items) {
+      const root = document.getElementById(id);
+      root.innerHTML = items.map((item, i) => {
+        const lab = labelOf(item);
+        const curl = item.curl ? `Curl ${item.curl}` : "No curl question";
+        return `<article class="card">
+          <img src="tiles/${item.tile}" alt="${item.tile}">
+          <div class="body">
+            <p class="meta">Square ${i + 1} · from the top ${Math.round(item.rel_y * 100)}%</p>
+            <span class="badge ${lab.cls}">${lab.text}</span>
+            <span class="curl">${curl}</span>
+            <p class="why">${item.reason}</p>
+          </div>
+        </article>`;
+      }).join("");
+    }
+
+    render("tiles-0357", PLANTS["0357"]);
+    render("tiles-0338", PLANTS["0338"]);
+    render("tiles-0329", PLANTS["0329"]);
+  </script>
+</body>
+</html>
