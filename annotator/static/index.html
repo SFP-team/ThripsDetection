@@ -17,11 +17,12 @@
         <img class="brand-logo" src="/static/logo.png" alt="Blueberry Breeding Program">
         <p class="eyebrow">Florida · Gainesville</p>
       </div>
-      <nav class="top-nav" id="top-nav" hidden>
-        <button type="button" data-go="label">Label</button>
-        <button type="button" data-go="review">Review</button>
+      <nav class="top-nav" id="top-nav">
+        <button type="button" data-go="label" data-needs-batch hidden>Label</button>
+        <button type="button" data-go="review" data-needs-batch hidden>Review</button>
         <button type="button" data-go="load">Home</button>
-        <a id="export-link" class="ghost" href="#">Export CSV</a>
+        <button type="button" data-go="guide">How to annotate</button>
+        <a id="export-link" class="ghost" href="#" data-needs-batch hidden>Export CSV</a>
         <button type="button" id="export-gpu" class="ghost" hidden>Export to GPU</button>
       </nav>
     </header>
@@ -124,24 +125,21 @@
           <div class="actions">
             <button type="button" class="choice flush" data-tissue="flush"><kbd>1</kbd> New growth</button>
             <button type="button" class="choice mature" data-tissue="mature"><kbd>2</kbd> Old leaves</button>
-            <button type="button" class="choice tube" data-tissue="tube"><kbd>3</kbd> Not a leaf</button>
+            <button type="button" class="choice tube" data-tissue="tube"><kbd>3</kbd> No leaf</button>
           </div>
         </div>
         <div class="label-step is-dim" id="step-injury">
-          <p class="step-label">2 · If new growth: hurt? Then curl?</p>
-          <div class="actions">
-            <button type="button" class="choice healthy" data-injury="healthy"><kbd>1</kbd> Healthy</button>
-            <button type="button" class="choice injured" data-injury="injured"><kbd>2</kbd> Injured</button>
-            <button type="button" class="choice skip" data-injury="skip"><kbd>3</kbd> Skip</button>
-          </div>
-          <div class="actions curl-row">
-            <button type="button" class="choice curl-yes" data-curl="yes"><kbd>Y</kbd> Curl yes</button>
-            <button type="button" class="choice curl-no" data-curl="no"><kbd>N</kbd> Curl no</button>
+          <p class="step-label">2 · If new growth, how much of that new growth is damaged?</p>
+          <div class="actions damage-actions">
+            <button type="button" class="choice healthy" data-injury="healthy"><kbd>1</kbd><span class="choice-copy"><span class="choice-name">Healthy</span><span class="choice-range">none</span></span></button>
+            <button type="button" class="choice mild" data-injury="mild"><kbd>2</kbd><span class="choice-copy"><span class="choice-name">Mild</span><span class="choice-range">under ~50%</span></span></button>
+            <button type="button" class="choice severe" data-injury="severe"><kbd>3</kbd><span class="choice-copy"><span class="choice-name">Severe</span><span class="choice-range">~50% or more</span></span></button>
+            <button type="button" class="choice uncertain" data-injury="uncertain"><kbd>4</kbd><span class="choice-copy"><span class="choice-name">Unsure</span><span class="choice-range">cannot tell</span></span></button>
           </div>
         </div>
         <div class="status-row">
           <p class="draft-status" id="draft-status">Mark the tissue first.</p>
-          <p class="hint"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> tissue, then injury &nbsp; <kbd>Y</kbd><kbd>N</kbd> curl &nbsp; <kbd>Z</kbd> undo &nbsp; <kbd>Esc</kbd> clear this tile &nbsp; mixed new growth = injured</p>
+          <p class="hint"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> tissue, then <kbd>1</kbd>–<kbd>4</kbd> damage &nbsp; <kbd>Z</kbd> undo &nbsp; <kbd>Esc</kbd> clear</p>
         </div>
         <div class="filmstrip" id="filmstrip"></div>
       </div>
@@ -151,10 +149,10 @@
         <p>Review the columns, or export the CSV for training.</p>
       </div>
       <aside class="rubric">
-        <span><strong>New growth</strong> young top leaves. Only these squares get a thrips injury label.</span>
-        <span><strong>Injured</strong> bronze, silver, cup, or crinkle on new growth. Mixed new growth = injured. Lime crinkle with no bronze or cup = healthy.</span>
-        <span><strong>Curl</strong> yes if the new growth is cupped, twisted, or crinkled. Separate from color.</span>
-        <span><strong>Old leaves / not a leaf</strong> old wood, pot, tag, sky. Not scored as thrips. Saved as skip.</span>
+        <span><strong>New growth</strong> a judgeable patch of young flush is enough. In mixed tiles, choose New growth and score only that flush. Do not use a percent of the whole square.</span>
+        <span><strong>Healthy</strong> none of the visible new growth is damaged. Pale, folded, or slightly crinkled young leaves can be normal.</span>
+        <span><strong>Mild / severe</strong> judge only the visible new growth in this square. Mild is under about half. Severe is about half or more.</span>
+        <span><strong>Old leaves / no leaf</strong> save immediately without a damage label. Use Unsure only for ambiguous new growth.</span>
       </aside>
     </section>
 
@@ -173,18 +171,180 @@
           <div class="column" data-col="flush_healthy"></div>
         </section>
         <section>
-          <h2>New growth injured</h2>
-          <div class="column" data-col="flush_injured"></div>
+          <h2>New growth mild</h2>
+          <div class="column" data-col="flush_mild"></div>
         </section>
+        <section>
+          <h2>New growth severe</h2>
+          <div class="column" data-col="flush_severe"></div>
+        </section>
+        <section>
+          <h2>New growth unsure</h2>
+          <div class="column" data-col="flush_uncertain"></div>
+        </section>
+      </div>
+      <div class="columns review-extra">
         <section>
           <h2>Old leaves</h2>
           <div class="column" data-col="mature"></div>
         </section>
         <section>
-          <h2>Not a leaf</h2>
+          <h2>No leaf</h2>
           <div class="column" data-col="skip"></div>
         </section>
+        <section id="legacy-review" class="legacy-review" hidden>
+          <h2>Legacy injured</h2>
+          <div class="column" data-col="flush_injured"></div>
+        </section>
       </div>
+    </section>
+
+    <section id="screen-guide" class="screen" hidden>
+      <div class="hero">
+        <div>
+          <p class="eyebrow">Blueberry Breeding Program</p>
+          <h1>How to annotate</h1>
+          <p class="lead">Label visible damage on current new growth. Do not look for insects. Do not rate the whole plant on a square. Do not score old-leaf damage.</p>
+        </div>
+      </div>
+
+      <nav class="guide-toc" aria-label="Guide sections">
+        <a href="#decision">Quick decision</a>
+        <a href="#tissue">Tissue</a>
+        <a href="#damage">Damage</a>
+        <a href="#difficult">Difficult cases</a>
+        <a href="#keys">Keyboard</a>
+      </nav>
+
+      <section id="decision" class="panel guide-section">
+        <p class="panel-kicker">Start here</p>
+        <h2>One tissue choice, then one damage choice</h2>
+        <p>Ask whether enough current new growth is visible to judge. If not, stop. If yes, mark how much of that new growth is damaged.</p>
+        <div class="guide-grid three">
+          <article>
+            <p class="panel-kicker">No</p>
+            <h3>Old leaves</h3>
+            <p>Useful foliage is present, but there is no judgeable new growth.</p>
+          </article>
+          <article>
+            <p class="panel-kicker">No leaf</p>
+            <h3>No leaf</h3>
+            <p>Tube, pot, sky, stem only, blur, or no useful leaf tissue.</p>
+          </article>
+          <article>
+            <p class="panel-kicker">Yes</p>
+            <h3>New growth</h3>
+            <p>Then choose Healthy (none), Mild (under ~50%), Severe (~50% or more), or Unsure.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="tissue" class="panel guide-section">
+        <p class="panel-kicker">Question 1</p>
+        <h2>What tissue is this?</h2>
+        <p>Do not use a percent of the whole square to choose tissue. Ask whether you can judge current new growth in this square.</p>
+        <div class="guide-grid three">
+          <article>
+            <h3>New growth</h3>
+            <p>A real, readable patch of young flush is visible. A few young leaves in a corner is enough. It does not need to fill most of the square.</p>
+          </article>
+          <article>
+            <h3>Old leaves</h3>
+            <p>The useful foliage is mature, and the young bit is too small, too blurry, or too cut off to judge.</p>
+          </article>
+          <article>
+            <h3>No leaf</h3>
+            <p>Tube, pot, soil, sky, background, stem only, heavy blur, or no useful leaf tissue.</p>
+          </article>
+        </div>
+        <p class="guide-rule">Mixed new and old leaves: if the young flush is judgeable, choose New growth. Then ignore the old leaves and mark Healthy, Mild, or Severe only on that new growth. The ~50% split is for damage on the young tissue, not for how much of the tile is young.</p>
+        <div class="guide-grid two">
+          <p class="guide-rule">Example: 70% old canopy and 30% bronzed young tips. Choose New growth, then Mild or Severe from those tips. Do not choose Old leaves or the model never sees the damage.</p>
+          <p class="guide-rule">Example: almost all old leaf plus a sliver of yellow you cannot read. Choose Old leaves. Do not guess.</p>
+        </div>
+      </section>
+
+      <section id="damage" class="panel guide-section">
+        <p class="panel-kicker">Question 2 · New growth only</p>
+        <h2>How much of the visible new growth is damaged?</h2>
+        <p>The percent is of the young tissue you can judge in this square, not of the whole tile and not of the plant.</p>
+        <div class="guide-grid two">
+          <article>
+            <h3>Healthy · none</h3>
+            <p>No convincing injury. Pale lime color, natural folding, soft leaves, or slight developmental crinkling alone are not damage.</p>
+          </article>
+          <article>
+            <h3>Mild · under ~50%</h3>
+            <p>Damage is clearly present, but most visible new growth still looks reasonably normal. Localized silvering, bronzing, scarring, or slight abnormal deformation.</p>
+          </article>
+          <article>
+            <h3>Severe · ~50% or more</h3>
+            <p>Damage dominates the visible new growth. Extensive discoloration, strong cupping or twisting, collapse, major deformation, or a dead young terminal.</p>
+          </article>
+          <article>
+            <h3>Unsure</h3>
+            <p>Judgeable new growth is present, but the evidence is genuinely ambiguous. Use this instead of guessing between healthy, mild, and severe.</p>
+          </article>
+        </div>
+        <div class="guide-grid two">
+          <p class="guide-rule">Mild: under about half of the visible new growth is damaged. Normal tissue still dominates.</p>
+          <p class="guide-rule">Severe: about half or more of the visible new growth is damaged. Damage dominates.</p>
+        </div>
+      </section>
+
+      <section id="difficult" class="panel guide-section">
+        <p class="panel-kicker">Common difficult cases</p>
+        <h2>Use the same rules every time</h2>
+        <div class="guide-grid two">
+          <article>
+            <h3>Pale or folded young leaves</h3>
+            <p>Do not call them damaged from color or folding alone. If there is no convincing injury, choose Healthy.</p>
+          </article>
+          <article>
+            <h3>Silvering without curl</h3>
+            <p>Curl is not required. Localized silvering can be Mild. Extensive or intense silvering can be Severe.</p>
+          </article>
+          <article>
+            <h3>Curl without discoloration</h3>
+            <p>Clearly abnormal but limited deformation can be Mild. Strong deformation that dominates the cluster can be Severe.</p>
+          </article>
+          <article>
+            <h3>Dead or dark terminal</h3>
+            <p>There is no extra checkbox. If a current young tip is clearly dead and that damage dominates the tile, choose Severe.</p>
+          </article>
+          <article>
+            <h3>Mixed new and old in one square</h3>
+            <p>Do not pick the tissue that fills more of the tile. If the young flush is judgeable, choose New growth and score only that flush. Choose Old leaves only when the young bit cannot be judged.</p>
+          </article>
+          <article>
+            <h3>Old-leaf spots</h3>
+            <p>Do not grade them as new-growth damage. Choose Old leaves when there is no judgeable new growth.</p>
+          </article>
+          <article>
+            <h3>Ambiguous new growth</h3>
+            <p>Choose Unsure when the young tissue is visible but severity cannot be decided. Choose No leaf only when useful leaf tissue cannot be assessed.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="keys" class="panel guide-section">
+        <p class="panel-kicker">Fast labeling</p>
+        <h2>Keyboard shortcuts</h2>
+        <div class="guide-grid three">
+          <article>
+            <h3>Tissue</h3>
+            <p><kbd>1</kbd> New growth &nbsp; <kbd>2</kbd> Old leaves &nbsp; <kbd>3</kbd> No leaf</p>
+          </article>
+          <article>
+            <h3>Damage</h3>
+            <p><kbd>1</kbd> Healthy none &nbsp; <kbd>2</kbd> Mild under ~50% &nbsp; <kbd>3</kbd> Severe ~50% or more &nbsp; <kbd>4</kbd> Unsure</p>
+          </article>
+          <article>
+            <h3>Navigation</h3>
+            <p><kbd>Z</kbd> Undo &nbsp; <kbd>Esc</kbd> Clear draft &nbsp; <kbd>←</kbd> <kbd>→</kbd> Move within plant</p>
+          </article>
+        </div>
+      </section>
     </section>
   </div>
   <div id="toast" hidden></div>

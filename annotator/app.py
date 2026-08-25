@@ -127,6 +127,11 @@ def index() -> FileResponse:
     return _index()
 
 
+@app.get("/how-to-annotate")
+def how_to_annotate() -> FileResponse:
+    return _index()
+
+
 @app.get("/batches/{batch_id}/label")
 @app.get("/batches/{batch_id}/review")
 def spa_batch(batch_id: int) -> FileResponse:
@@ -363,7 +368,6 @@ def api_export(batch_id: int) -> StreamingResponse:
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
-
 @app.post("/api/batches/{batch_id}/export-gpu")
 def api_export_gpu(batch_id: int) -> dict[str, Any]:
     if get_batch(batch_id) is None:
@@ -442,5 +446,3 @@ def media_context(tile_id: int) -> StreamingResponse:
         media_type="image/jpeg",
         headers={"Cache-Control": "no-store"},
     )
-
-

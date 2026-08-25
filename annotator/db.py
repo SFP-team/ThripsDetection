@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS labels (
     tissue TEXT,
     injury TEXT,
     curl TEXT,
+    protocol_version TEXT,
     annotator TEXT NOT NULL,
     labeled_at TEXT NOT NULL
 );
@@ -105,7 +106,7 @@ def init_db() -> None:
             row["name"]
             for row in conn.execute("PRAGMA table_info(labels)").fetchall()
         }
-        for name in ("tissue", "injury", "curl"):
+        for name in ("tissue", "injury", "curl", "protocol_version"):
             if name not in columns:
                 conn.execute(f"ALTER TABLE labels ADD COLUMN {name} TEXT")
         batch_cols = {
@@ -221,12 +222,18 @@ def _counts(conn: sqlite3.Connection, batch_id: int) -> dict[str, int]:
     counts = {
         "healthy": 0,
         "injured": 0,
+        "mild": 0,
+        "severe": 0,
+        "uncertain": 0,
         "skip": 0,
         "flush": 0,
         "mature": 0,
         "tube": 0,
         "flush_healthy": 0,
         "flush_injured": 0,
+        "flush_mild": 0,
+        "flush_severe": 0,
+        "flush_uncertain": 0,
         "curl_yes": 0,
         "curl_no": 0,
     }
@@ -255,6 +262,12 @@ def _counts(conn: sqlite3.Connection, batch_id: int) -> dict[str, int]:
             counts["flush_healthy"] += 1
         if tissue == "flush" and injury == "injured":
             counts["flush_injured"] += 1
+        if tissue == "flush" and injury == "mild":
+            counts["flush_mild"] += 1
+        if tissue == "flush" and injury == "severe":
+            counts["flush_severe"] += 1
+        if tissue == "flush" and injury == "uncertain":
+            counts["flush_uncertain"] += 1
         if row["curl"] == "yes":
             counts["curl_yes"] += 1
         if row["curl"] == "no":
@@ -467,8 +480,8 @@ def review_tiles(batch_id: int, label: str | None = None, image_id: int | None =
 
 
 TISSUES = {"flush", "mature", "tube"}
-INJURIES = {"healthy", "injured", "skip"}
-CURLS = {"yes", "no"}
+INJURIES = {"healthy", "mild", "severe", "uncertain"}
+PROTOCOL_VERSION = "visible_new_growth_damage_v2"
 
 
 def normalize_annotation(tissue: str, injury: str | None, curl: str | None) -> tuple[str, str, str | None]:
@@ -477,12 +490,8 @@ def normalize_annotation(tissue: str, injury: str | None, curl: str | None) -> t
     if tissue != "flush":
         return tissue, "skip", None
     if injury not in INJURIES:
-        raise ValueError("flush tiles need healthy, injured, or skip")
-    if injury == "skip":
-        return tissue, injury, None
-    if curl not in CURLS:
-        raise ValueError("flush healthy/injured tiles need curl yes or no")
-    return tissue, injury, curl
+        raise ValueError("new-growth tiles need healthy, mild, severe, or uncertain")
+    return tissue, injury, None
 
 
 def add_label(
@@ -500,10 +509,11 @@ def add_label(
             raise KeyError(f"tile {tile_id} not found")
         cursor = conn.execute(
             """
-            INSERT INTO labels (tile_id, label, tissue, injury, curl, annotator, labeled_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO labels (
+                tile_id, label, tissue, injury, curl, protocol_version, annotator, labeled_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (tile_id, injury, tissue, injury, curl, annotator, now_iso()),
+            (tile_id, injury, tissue, injury, curl, PROTOCOL_VERSION, annotator, now_iso()),
         )
         label_id = int(cursor.lastrowid)
         conn.execute(
@@ -543,6 +553,7 @@ def export_rows(batch_id: int) -> list[dict[str, Any]]:
                 COALESCE(labels.injury, labels.label) AS injury,
                 COALESCE(labels.curl, '') AS curl,
                 COALESCE(labels.injury, labels.label) AS label,
+                COALESCE(labels.protocol_version, 'legacy') AS protocol_version,
                 labels.annotator,
                 labels.labeled_at
             FROM tiles

@@ -603,7 +603,14 @@ button.ghost:disabled,
   grid-template-columns: 1fr 1fr;
 }
 
+.damage-actions {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .choice {
+  display: flex;
+  align-items: center;
+  text-align: left;
   border: 0;
   padding: 10px 12px;
   font-family: var(--font-geist-sans);
@@ -616,6 +623,22 @@ button.ghost:disabled,
   color: var(--color-obsidian);
   box-shadow: var(--shadow-subtle-2);
   transition: background var(--ease), color var(--ease), transform var(--ease), box-shadow var(--ease);
+}
+
+.choice-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.choice-range {
+  font-family: var(--font-geist-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-graphite);
 }
 
 .choice:hover {
@@ -640,7 +663,8 @@ button.ghost:disabled,
   box-shadow: none;
 }
 
-.choice.active kbd { color: var(--color-ash); }
+.choice.active kbd,
+.choice.active .choice-range { color: var(--color-ash); }
 
 .status-row {
   display: flex;
@@ -703,8 +727,14 @@ button.ghost:disabled,
 
 .filmstrip button.flush_healthy,
 .filmstrip button.healthy { box-shadow: 0 0 0 1px var(--color-terminal-green); }
+.filmstrip button.flush_mild,
+.filmstrip button.mild { box-shadow: 0 0 0 1px var(--color-slate); }
+.filmstrip button.flush_severe,
 .filmstrip button.flush_injured,
+.filmstrip button.severe,
 .filmstrip button.injured { box-shadow: 0 0 0 1px var(--color-obsidian); }
+.filmstrip button.flush_uncertain,
+.filmstrip button.uncertain { box-shadow: 0 0 0 1px var(--color-graphite); }
 .filmstrip button.mature,
 .filmstrip button.tube,
 .filmstrip button.skip { box-shadow: 0 0 0 1px var(--color-ash); }
@@ -779,6 +809,13 @@ button.ghost:disabled,
   grid-template-columns: 1fr 1fr 1fr 1fr;
 }
 
+.review-extra {
+  margin-top: var(--spacing-12);
+  grid-template-columns: 1fr 1fr;
+}
+
+.legacy-review { opacity: 0.72; }
+
 .columns h2 {
   font-size: 16px;
   letter-spacing: -0.02em;
@@ -845,6 +882,88 @@ button.ghost:disabled,
   display: block;
 }
 
+.guide-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-8);
+  margin: 0 0 var(--spacing-24);
+}
+
+.guide-toc a {
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-charcoal);
+  font-size: 14px;
+  text-decoration: none;
+  box-shadow: var(--shadow-subtle-2);
+  transition: background var(--ease), color var(--ease);
+}
+
+.guide-toc a:hover {
+  background: var(--color-pure-white);
+  color: var(--color-obsidian);
+}
+
+.guide-section {
+  scroll-margin-top: 88px;
+}
+
+.guide-section h2 {
+  margin-bottom: var(--spacing-16);
+}
+
+.guide-section h3 {
+  margin: 0 0 var(--spacing-8);
+  color: var(--color-obsidian);
+  font-size: 20px;
+  font-weight: 400;
+  letter-spacing: -0.6px;
+  line-height: 1.2;
+}
+
+.guide-grid {
+  display: grid;
+  gap: var(--spacing-12);
+  margin-top: var(--spacing-16);
+}
+
+.guide-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.guide-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.guide-grid article {
+  padding: var(--spacing-16);
+  border-radius: var(--radius-md);
+  background: var(--color-paper-white);
+  box-shadow: var(--shadow-subtle-2);
+}
+
+.guide-grid article p {
+  margin: 0;
+}
+
+.guide-rule {
+  margin: var(--spacing-16) 0 0;
+  padding: var(--spacing-16);
+  border-radius: var(--radius-md);
+  background: var(--color-paper-white);
+  color: var(--color-charcoal);
+  font-size: 14px;
+  line-height: 1.5;
+  box-shadow: var(--shadow-subtle-2);
+}
+
+.guide-section kbd {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  box-shadow: var(--shadow-subtle-2);
+  font-family: var(--font-geist-mono);
+  font-size: 12px;
+  color: var(--color-obsidian);
+}
+
 #toast {
   position: fixed;
   bottom: 24px;
@@ -896,7 +1015,8 @@ button.ghost:disabled,
 }
 
 @media (max-width: 860px) {
-  .grid-2, .columns, .columns.cols-4, .settings-grid, .actions, .curl-row, .rubric, .hero, .status-row {
+  .grid-2, .columns, .columns.cols-4, .settings-grid, .actions, .curl-row, .rubric, .hero, .status-row,
+  .guide-grid.two, .guide-grid.three {
     grid-template-columns: 1fr;
   }
   h1 { font-size: 36px; letter-spacing: -1.5px; }

@@ -10,6 +10,7 @@ EXPORT_FIELDS = [
     "injury",
     "curl",
     "label",
+    "protocol_version",
     "annotator",
     "labeled_at",
 ]

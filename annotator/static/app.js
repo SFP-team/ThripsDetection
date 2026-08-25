@@ -9,7 +9,7 @@ const state = {
   plant: [],
   jobId: null,
   poll: null,
-  draft: { tissue: null, injury: null, curl: null },
+  draft: { tissue: null, injury: null },
   fromReview: false,
   plantFilter: "",
   skipPush: false,
@@ -18,7 +18,7 @@ const state = {
 const TISSUE_NAME = {
   flush: "new growth",
   mature: "old leaves",
-  tube: "not a leaf",
+  tube: "no leaf",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -45,6 +45,7 @@ async function api(path, options = {}) {
 }
 
 function pathFor() {
+  if (state.screen === "guide") return "/how-to-annotate";
   if (!state.batch || state.screen === "load" || state.screen === "progress") return "/";
   if (state.screen === "review") {
     const query = state.plantFilter ? `?plant=${encodeURIComponent(state.plantFilter)}` : "";
@@ -57,20 +58,20 @@ function pathFor() {
 function persist(replace = false) {
   const name = ($("annotator")?.value || "").trim();
   if (name) localStorage.setItem(NAME_KEY, name);
-  if (!state.batch) return;
-  const session = {
-    batchId: state.batch.id,
-    tileId: state.tile?.id || null,
-    screen: state.screen,
-    plantFilter: state.plantFilter || "",
-    fromReview: state.fromReview,
-  };
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  if (state.batch && state.screen !== "guide" && state.screen !== "progress") {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      batchId: state.batch.id,
+      tileId: state.tile?.id || null,
+      screen: state.screen,
+      plantFilter: state.plantFilter || "",
+      fromReview: state.fromReview,
+    }));
+  }
   const url = pathFor();
   const next = `${location.origin}${url}`;
   if (next === location.href) return;
   const method = replace || state.skipPush ? "replaceState" : "pushState";
-  history[method](session, "", url);
+  history[method]({ screen: state.screen, batchId: state.batch?.id || null }, "", url);
 }
 
 function readSession() {
@@ -82,7 +83,9 @@ function readSession() {
 }
 
 function parseLocation() {
-  const match = location.pathname.match(/^\/batches\/(\d+)\/(label|review)$/);
+  const path = location.pathname.replace(/\/$/, "") || "/";
+  if (path === "/how-to-annotate") return { screen: "guide" };
+  const match = path.match(/^\/batches\/(\d+)\/(label|review)$/);
   if (!match) return null;
   const params = new URLSearchParams(location.search);
   return {
@@ -96,17 +99,22 @@ function parseLocation() {
 function show(screen, replace = false) {
   state.screen = screen;
   document.body.dataset.screen = screen;
-  for (const id of ["load", "progress", "label", "review"]) {
+  for (const id of ["load", "progress", "label", "review", "guide"]) {
     const node = $(`screen-${id}`);
+    if (!node) continue;
     const visible = id === screen;
     node.hidden = !visible;
     node.classList.toggle("is-visible", visible);
   }
-  $("top-nav").hidden = !state.batch || screen === "progress";
+  const hasBatch = Boolean(state.batch);
+  $("top-nav").hidden = screen === "progress";
+  for (const item of document.querySelectorAll("#top-nav [data-needs-batch]")) {
+    item.hidden = !hasBatch;
+  }
   for (const button of document.querySelectorAll("#top-nav [data-go]")) {
     button.classList.toggle("active", button.dataset.go === screen);
   }
-  if (state.batch) {
+  if (hasBatch) {
     $("export-link").href = `/api/batches/${state.batch.id}/export`;
   }
   paintGpuControls();
@@ -162,7 +170,6 @@ function resetDraft(fromLabel) {
   state.draft = {
     tissue: fromLabel?.tissue || null,
     injury: fromLabel?.injury || fromLabel?.label || null,
-    curl: fromLabel?.curl || null,
   };
 }
 
@@ -188,9 +195,6 @@ function paintDraft() {
   }
   for (const button of document.querySelectorAll("[data-injury]")) {
     button.classList.toggle("active", flush && button.dataset.injury === state.draft.injury);
-  }
-  for (const button of document.querySelectorAll("[data-curl]")) {
-    button.classList.toggle("active", flush && button.dataset.curl === state.draft.curl);
   }
 }
 
@@ -266,6 +270,9 @@ function renderDone() {
 
 function tileTone(item) {
   if (item.tissue === "flush" && item.injury === "healthy") return "flush_healthy";
+  if (item.tissue === "flush" && item.injury === "mild") return "flush_mild";
+  if (item.tissue === "flush" && item.injury === "severe") return "flush_severe";
+  if (item.tissue === "flush" && item.injury === "uncertain") return "flush_uncertain";
   if (item.tissue === "flush" && item.injury === "injured") return "flush_injured";
   if (item.tissue === "mature") return "mature";
   if (item.tissue === "tube" || item.injury === "skip" || item.label === "skip") return "skip";
@@ -287,7 +294,7 @@ function renderLabel() {
   const pct = counts.tiles ? Math.round((counts.labeled / counts.tiles) * 100) : 0;
   $("label-meta").innerHTML = `
     <span>${state.tile.image} · plant ${plantNo} / ${plants.length} · tile ${tileNo} / ${plantTiles.length}</span>
-    <span>${counts.labeled} labeled · ${counts.unlabeled} left · ${counts.flush_injured || 0} new growth injured</span>
+    <span>${counts.labeled} labeled · ${counts.unlabeled} left · ${counts.flush_mild || 0} mild · ${counts.flush_severe || 0} severe</span>
   `;
   $("progress-fill").style.width = `${pct}%`;
   fadeImage($("tile-image"), `/media/tile/${state.tile.id}`);
@@ -299,7 +306,7 @@ function renderLabel() {
   $("filmstrip").innerHTML = plantTiles
     .map(
       (item) => `
-      <button type="button" class="${item.id === state.tile.id ? "current" : ""} ${tileTone(item)}" data-tile="${item.id}" title="${TISSUE_NAME[item.tissue] || "unlabeled"} ${item.curl ? `curl ${item.curl}` : ""}">
+      <button type="button" class="${item.id === state.tile.id ? "current" : ""} ${tileTone(item)}" data-tile="${item.id}" title="${TISSUE_NAME[item.tissue] || "unlabeled"} ${item.injury || ""}">
         <img src="/media/tile/${item.id}" alt="${item.tile}">
       </button>`
     )
@@ -310,18 +317,18 @@ function renderLabel() {
 
 function draftStatus() {
   if (!state.draft.tissue) return "Mark the tissue first.";
-  if (state.draft.tissue !== "flush") return `${TISSUE_NAME[state.draft.tissue]} saved as skip.`;
-  if (!state.draft.injury) return "New growth. Now mark healthy, injured, or skip.";
-  if (state.draft.injury === "skip") return "New growth skip. Not scored.";
-  if (!state.draft.curl) return `New growth ${state.draft.injury}. Now mark curl yes or no.`;
-  return `New growth ${state.draft.injury}, curl ${state.draft.curl}.`;
+  if (state.draft.tissue !== "flush") return `${TISSUE_NAME[state.draft.tissue]}: no damage label needed.`;
+  if (!state.draft.injury) return "New growth. Now mark healthy, mild, severe, or unsure.";
+  if (!["healthy", "mild", "severe", "uncertain"].includes(state.draft.injury)) {
+    return "Legacy label. Choose healthy, mild, severe, or unsure to update it.";
+  }
+  return `New growth: ${state.draft.injury}.`;
 }
 
 function canSaveDraft() {
   if (!state.draft.tissue) return false;
   if (state.draft.tissue !== "flush") return true;
-  if (state.draft.injury === "skip") return true;
-  return Boolean(state.draft.injury && state.draft.curl);
+  return ["healthy", "mild", "severe", "uncertain"].includes(state.draft.injury);
 }
 
 async function saveDraft() {
@@ -334,7 +341,7 @@ async function saveDraft() {
       tile_id: state.tile.id,
       tissue: state.draft.tissue,
       injury: state.draft.injury,
-      curl: state.draft.curl,
+      curl: null,
       annotator: name,
     }),
   });
@@ -365,13 +372,11 @@ async function chooseTissue(tissue) {
   state.draft.tissue = tissue;
   if (tissue !== "flush") {
     state.draft.injury = "skip";
-    state.draft.curl = null;
     paintDraft();
     await saveDraft();
     return;
   }
   state.draft.injury = null;
-  state.draft.curl = null;
   paintDraft();
   stashDraft();
 }
@@ -379,24 +384,6 @@ async function chooseTissue(tissue) {
 async function chooseInjury(injury) {
   if (!state.tile || state.draft.tissue !== "flush") return;
   state.draft.injury = injury;
-  if (injury === "skip") {
-    state.draft.curl = null;
-    paintDraft();
-    await saveDraft();
-    return;
-  }
-  paintDraft();
-  stashDraft();
-  if (state.draft.curl) await saveDraft();
-}
-
-async function chooseCurl(curl) {
-  if (!state.tile || state.draft.tissue !== "flush") return;
-  if (!state.draft.injury || state.draft.injury === "skip") {
-    flash({ message: "Mark healthy or injured first." });
-    return;
-  }
-  state.draft.curl = curl;
   paintDraft();
   await saveDraft();
 }
@@ -419,6 +406,9 @@ async function undo() {
 
 function reviewBucket(item) {
   if (item.tissue === "flush" && item.injury === "healthy") return "flush_healthy";
+  if (item.tissue === "flush" && item.injury === "mild") return "flush_mild";
+  if (item.tissue === "flush" && item.injury === "severe") return "flush_severe";
+  if (item.tissue === "flush" && item.injury === "uncertain") return "flush_uncertain";
   if (item.tissue === "flush" && item.injury === "injured") return "flush_injured";
   if (item.tissue === "mature") return "mature";
   return "skip";
@@ -433,7 +423,7 @@ async function renderReview() {
   state.batch = payload.batch;
   const counts = state.batch.counts;
   $("review-counts").textContent =
-    `${counts.flush_healthy || 0} new growth healthy · ${counts.flush_injured || 0} new growth injured · ${counts.curl_yes || 0} curl · ${counts.mature || 0} old leaves · ${counts.unlabeled} left`;
+    `${counts.flush_healthy || 0} healthy · ${counts.flush_mild || 0} mild · ${counts.flush_severe || 0} severe · ${counts.flush_uncertain || 0} unsure · ${counts.mature || 0} old leaves · ${counts.unlabeled} left`;
   const select = $("review-plant");
   select.innerHTML =
     `<option value="">All plants</option>` +
@@ -441,15 +431,15 @@ async function renderReview() {
       .map((item) => `<option value="${item.id}">${item.filename}</option>`)
       .join("");
   select.value = state.plantFilter;
-  for (const name of ["flush_healthy", "flush_injured", "mature", "skip"]) {
+  const legacy = $("legacy-review");
+  if (legacy) legacy.hidden = !(counts.flush_injured);
+  for (const name of ["flush_healthy", "flush_mild", "flush_severe", "flush_uncertain", "flush_injured", "mature", "skip"]) {
     const column = document.querySelector(`[data-col="${name}"]`);
+    if (!column) continue;
     const tiles = payload.tiles.filter((item) => reviewBucket(item) === name);
     column.innerHTML = tiles
       .map((item) => {
-        const curl = item.curl
-          ? `<span class="curl-chip">${item.curl === "yes" ? "curl" : "flat"}</span>`
-          : "";
-        return `<button type="button" data-tile="${item.id}" title="${item.image} ${item.tissue || ""} ${item.injury || ""} ${item.curl ? `curl ${item.curl}` : ""}"><img src="/media/tile/${item.id}" alt="${item.tile}">${curl}</button>`;
+        return `<button type="button" data-tile="${item.id}" title="${item.image} ${item.tissue || ""} ${item.injury || ""}"><img src="/media/tile/${item.id}" alt="${item.tile}"></button>`;
       })
       .join("");
   }
@@ -473,7 +463,7 @@ function paintGpuControls() {
   }
   const exportGpu = $("export-gpu");
   if (exportGpu) {
-    exportGpu.hidden = !ready || !state.batch || state.screen === "progress" || state.screen === "load";
+    exportGpu.hidden = !ready || !state.batch || ["progress", "load", "guide"].includes(state.screen);
     exportGpu.disabled = !ready || !state.batch;
   }
 }
@@ -777,11 +767,15 @@ $("filmstrip").addEventListener("click", (event) => {
 });
 
 $("top-nav").addEventListener("click", (event) => {
-  const go = event.target.dataset.go;
+  const go = event.target.closest("[data-go]")?.dataset.go;
   if (go === "load") {
     state.fromReview = false;
     show("load");
     loadSessions().catch(flash);
+  }
+  if (go === "guide") {
+    show("guide");
+    window.scrollTo(0, 0);
   }
   if (go === "label" && state.batch) {
     openBatch(state.batch.id, state.tile?.id || readSession()?.tileId || null, {
@@ -800,7 +794,7 @@ $("review-plant").addEventListener("change", () => {
   renderReview().then(() => persist(true)).catch(flash);
 });
 
-document.querySelector(".columns").addEventListener("click", (event) => {
+$("screen-review").addEventListener("click", (event) => {
   const button = event.target.closest("[data-tile]");
   if (!button) return;
   openBatch(state.batch.id, Number(button.dataset.tile), { fromReview: true }).catch(flash);
@@ -813,9 +807,7 @@ document.querySelector("#step-tissue").addEventListener("click", (event) => {
 
 document.querySelector("#step-injury").addEventListener("click", (event) => {
   const injury = event.target.closest("[data-injury]");
-  const curl = event.target.closest("[data-curl]");
   if (injury) chooseInjury(injury.dataset.injury).catch(flash);
-  if (curl) chooseCurl(curl.dataset.curl).catch(flash);
 });
 
 document.addEventListener("keydown", (event) => {
@@ -852,14 +844,12 @@ document.addEventListener("keydown", (event) => {
     if (key === "3") chooseTissue("tube").catch(flash);
     return;
   }
-  if (state.draft.tissue === "flush" && !state.draft.injury) {
+  if (state.draft.tissue === "flush") {
     if (key === "1") chooseInjury("healthy").catch(flash);
-    if (key === "2") chooseInjury("injured").catch(flash);
-    if (key === "3") chooseInjury("skip").catch(flash);
-    return;
+    if (key === "2") chooseInjury("mild").catch(flash);
+    if (key === "3") chooseInjury("severe").catch(flash);
+    if (key === "4") chooseInjury("uncertain").catch(flash);
   }
-  if (key === "y" || key === "Y") chooseCurl("yes").catch(flash);
-  if (key === "n" || key === "N") chooseCurl("no").catch(flash);
 });
 
 window.addEventListener("popstate", () => {
@@ -867,9 +857,22 @@ window.addEventListener("popstate", () => {
 });
 
 async function boot() {
-  await loadSettings();
-  const sessions = await loadSessions();
+  let sessions = [];
+  try {
+    await loadSettings();
+    sessions = await loadSessions();
+  } catch (error) {
+    flash(error);
+  }
   const located = parseLocation();
+  if (located?.screen === "guide") {
+    show("guide", true);
+    const hash = location.hash;
+    if (hash) {
+      requestAnimationFrame(() => document.querySelector(hash)?.scrollIntoView());
+    }
+    return;
+  }
   const known = sessions.find((item) => item.batch_id === located?.batchId);
   if (located && known) {
     const session = readSession();
