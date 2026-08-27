@@ -22,6 +22,7 @@
         <button type="button" data-go="review" data-needs-batch hidden>Review</button>
         <button type="button" data-go="load">Home</button>
         <button type="button" data-go="guide">How to annotate</button>
+        <button type="button" data-go="predict">Predict damage</button>
         <a id="export-link" class="ghost" href="#" data-needs-batch hidden>Export CSV</a>
         <button type="button" id="export-gpu" class="ghost" hidden>Export to GPU</button>
       </nav>
@@ -345,6 +346,164 @@
           </article>
         </div>
       </section>
+    </section>
+
+    <section id="screen-predict" class="screen" hidden>
+      <div id="predict-setup">
+      <div class="hero">
+        <div>
+          <p class="eyebrow">Blueberry Breeding Program</p>
+          <h1>Predict visible plant damage</h1>
+          <p class="lead">Upload rover photographs to estimate visible new-growth damage and rank plants from least to most damaged. This model measures visible injury. It does not detect insects or prescribe pesticide dosage.</p>
+        </div>
+      </div>
+
+      <div class="home-name predict-name">
+        <label>Your name
+          <input id="predict-annotator" name="predict-annotator" autocomplete="nickname" placeholder="First name">
+        </label>
+        <label>Run name
+          <input id="predict-run-name" placeholder="Field block 26 Aug">
+        </label>
+      </div>
+
+      <div id="predict-upload" class="predict-upload">
+        <form id="form-predict-gpu" class="panel home-card">
+          <p class="panel-kicker">Raw photographs</p>
+          <h2>Send to the GPU</h2>
+          <p id="predict-gpu-hint">This computer sends JPGs to the GPU. The GPU cuts tiles, scores visible damage, and sends the report back.</p>
+          <label>Folder path of raw photos
+            <input id="predict-gpu-path" placeholder="/path/to/rover/photos">
+          </label>
+          <button type="submit" class="primary" id="predict-gpu-path-btn">Score this folder</button>
+          <p class="or">or</p>
+          <label class="drop" id="predict-file-drop">
+            <input id="predict-file-input" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" multiple hidden>
+            Drop photographs here, or click to choose them
+          </label>
+          <p class="or">or a folder</p>
+          <label class="drop" id="predict-folder-drop">
+            <input id="predict-folder-input" type="file" webkitdirectory directory multiple hidden>
+            Drop a folder of photographs, or click to choose one
+          </label>
+        </form>
+
+        <form id="form-predict-tiled" class="panel home-card">
+          <p class="panel-kicker">Existing tiled run</p>
+          <h2>Already cut</h2>
+          <p id="predict-tiled-hint">Use this only when the folder already has tiles_foliage.csv and foliage tiles. Raw rover photos belong on the left.</p>
+          <label>Folder path of a tiled run
+            <input id="predict-tiled-path" placeholder="/path/to/birefnet_tiles">
+          </label>
+          <button type="submit" class="primary" id="predict-tiled-path-btn">Score this tiled run</button>
+          <p class="or">or</p>
+          <label class="drop" id="predict-tiled-drop">
+            <input id="predict-tiled-folder-input" type="file" webkitdirectory directory multiple hidden>
+            Drop a tiled folder here, or click to choose one
+          </label>
+        </form>
+      </div>
+      </div>
+
+      <div id="predict-runs" class="panel" hidden>
+        <p class="panel-kicker">Reports on this computer</p>
+        <h2>Open a finished run</h2>
+        <ul id="predict-run-list"></ul>
+      </div>
+
+      <div id="predict-progress" class="progress-card" hidden>
+        <p class="eyebrow" id="predict-progress-step">Preparing</p>
+        <h2 id="predict-progress-title">Sending photographs</h2>
+        <p id="predict-progress-detail">Starting…</p>
+        <ol class="steps" id="predict-steps">
+          <li data-step="sending">Sending photographs to the GPU</li>
+          <li data-step="segmenting">Finding and cutting out each plant</li>
+          <li data-step="filtering">Keeping leaf tiles</li>
+          <li data-step="scoring_tiles">Measuring visible damage</li>
+          <li data-step="aggregating_plants">Calculating whole-plant severity</li>
+          <li data-step="ready">Predictions are ready</li>
+        </ol>
+      </div>
+
+      <div id="predict-results" hidden>
+        <div class="predict-toolbar">
+          <div>
+            <p class="panel-kicker" id="predict-result-kicker">Ranking</p>
+            <h2 id="predict-result-title">Most damaged first</h2>
+            <p class="lead predict-note">Rank and high / medium / low are prioritization in this upload, not a treatment rate. The 1 to 5 score is a rounded rank, not a scout grade.</p>
+          </div>
+          <div class="predict-exports">
+            <button type="button" class="ghost" id="predict-new">New prediction</button>
+            <a id="predict-export-plants" class="ghost" href="#">Download plant CSV</a>
+            <a id="predict-export-tiles" class="ghost" href="#">Download tile CSV</a>
+          </div>
+        </div>
+        <div class="predict-cutoffs">
+          <label>High priority share
+            <input id="predict-high-frac" type="number" min="5" max="90" step="5" value="20">
+          </label>
+          <label>Medium priority share
+            <input id="predict-mid-frac" type="number" min="5" max="90" step="5" value="30">
+          </label>
+          <p class="mono-meta" id="predict-result-counts"></p>
+        </div>
+        <div class="table-wrap">
+          <table class="predict-table" id="predict-table">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Plant</th>
+                <th>Damage index</th>
+                <th>Score</th>
+                <th>Broad severity</th>
+                <th>Confidence</th>
+                <th>Priority</th>
+                <th>Review</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="predict-detail" hidden>
+        <button type="button" class="ghost" id="predict-back">Back to ranking</button>
+        <div class="predict-detail-head">
+          <div>
+            <p class="panel-kicker" id="predict-detail-kicker">Plant evidence</p>
+            <h2 id="predict-detail-title"></h2>
+            <p class="lead" id="predict-detail-summary"></p>
+          </div>
+          <p class="warning" id="predict-detail-warning" hidden></p>
+        </div>
+        <div class="predict-evidence" id="predict-evidence">
+          <figure class="predict-stage" id="predict-original-stage">
+            <figcaption>Original photograph</figcaption>
+            <img id="predict-original" alt="Original plant photograph">
+          </figure>
+          <figure class="predict-stage overlay-stage" id="predict-overlay-stage">
+            <figcaption>Plant photograph. Color marks visible new-growth damage.</figcaption>
+            <div class="overlay-wrap">
+              <img id="predict-crop" alt="" hidden>
+              <canvas id="predict-reconstruct" aria-label="Plant rebuilt from tiles"></canvas>
+              <canvas id="predict-overlay" aria-label="Visible damage heatmap"></canvas>
+            </div>
+            <p class="overlay-status" id="predict-overlay-status" hidden>Rebuilding the plant from its leaf tiles…</p>
+            <p class="overlay-legend">
+              <span class="swatch healthy"></span> Healthy new growth
+              <span class="swatch mild"></span> Mild
+              <span class="swatch severe"></span> Severe
+              Each outlined square is a scored new-growth tile. The bar color is the call. Click a square for the numbers.
+            </p>
+          </figure>
+          <aside class="predict-scores" id="predict-scores"></aside>
+        </div>
+        <div class="tile-prob" id="predict-tile-prob" hidden></div>
+        <div id="predict-evidence-block">
+          <p class="panel-kicker">Highest-damage distinct tiles</p>
+          <div class="evidence-tiles" id="predict-evidence-tiles"></div>
+        </div>
+      </div>
     </section>
   </div>
   <div id="toast" hidden></div>
