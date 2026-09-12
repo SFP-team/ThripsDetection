@@ -14,19 +14,12 @@ SETTINGS_PATH = DATA / "settings.json"
 @dataclass
 class Settings:
     annotator: str = "lab"
-    pipeline_mode: str = "ssh"
     ssh_host: str = "10.248.22.167"
     ssh_user: str = "fpt"
     ssh_password: str = ""
     remote_project: str = "/home/fpt/RaghavWork/Segmentation_ResearchPaper"
     remote_python: str = "/home/fpt/RaghavWork/Segmentation_ResearchPaper/.venv/bin/python"
     remote_work: str = "/home/fpt/Chili thrips detection pictures/annotator_jobs"
-    remote_existing_run: str = (
-        "/home/fpt/Chili thrips detection pictures/analysis_2026-08-17/birefnet_tiles"
-    )
-    local_existing_run: str = ""
-    local_project: str = ""
-    local_python: str = "python3"
     device: str = "cuda:0"
     fold: int = 0
     annotator_slot: str = "annotator_1"
@@ -35,17 +28,12 @@ class Settings:
 def _apply_env(settings: Settings) -> Settings:
     mapping = {
         "ANNOTATOR_NAME": "annotator",
-        "ANNOTATOR_PIPELINE_MODE": "pipeline_mode",
         "ANNOTATOR_SSH_HOST": "ssh_host",
         "ANNOTATOR_SSH_USER": "ssh_user",
         "ANNOTATOR_SSH_PASSWORD": "ssh_password",
         "ANNOTATOR_REMOTE_PROJECT": "remote_project",
         "ANNOTATOR_REMOTE_PYTHON": "remote_python",
         "ANNOTATOR_REMOTE_WORK": "remote_work",
-        "ANNOTATOR_REMOTE_EXISTING_RUN": "remote_existing_run",
-        "ANNOTATOR_LOCAL_EXISTING_RUN": "local_existing_run",
-        "ANNOTATOR_LOCAL_PROJECT": "local_project",
-        "ANNOTATOR_LOCAL_PYTHON": "local_python",
         "ANNOTATOR_DEVICE": "device",
         "ANNOTATOR_SLOT": "annotator_slot",
     }
@@ -84,12 +72,6 @@ def load_settings() -> Settings:
             if key in known:
                 setattr(settings, key, value)
     return _apply_env(settings)
-
-
-def save_settings(settings: Settings) -> Settings:
-    DATA.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps(asdict(settings), indent=2) + "\n")
-    return settings
 
 
 def public_settings(settings: Settings) -> dict:

@@ -14,10 +14,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import torch
 from PIL import Image, ImageDraw, ImageOps
-from torchvision.transforms import InterpolationMode
-from torchvision.transforms import functional as TF
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 TILE = 512
@@ -34,7 +31,70 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", required=True)
     parser.add_argument("--fold", type=int, default=0)
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument(
+        "--skip-previews",
+        action="store_true",
+        help="Skip overlay and contact-sheet JPEGs. Crops, tiles, and CSVs are still written.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip photographs already listed in output/images.csv.",
+    )
     return parser.parse_args()
+
+
+IMAGE_FIELDS = [
+    "image", "width", "height", "seed_x", "seed_y", "seed_method", "mask_used",
+    "selected_frac", "balanced_frac", "box_x0", "box_y0", "box_x1", "box_y1",
+    "box_w", "box_h", "tiles_generated", "tiles_kept",
+]
+TILE_FIELDS = ["image", "tile", "x", "y", "width", "height", "mask_frac", "seed_method", "mask_used"]
+
+
+def write_csv(path: Path, fields: list[str], rows: list[dict[str, object]]) -> None:
+    """Write through a temp file and rename, so a crash never leaves a torn CSV."""
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    tmp.replace(path)
+
+
+def load_csv(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    with path.open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
+def load_resume_state(output: Path) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Rows from a previous run. images.csv is the record of finished photos.
+
+    tiles.csv is written before images.csv for each photo, so after a crash it
+    can hold rows for a photo images.csv never confirmed. Those rows are
+    dropped here and the photo is cut again, which avoids duplicate tile rows.
+    """
+    image_rows = load_csv(output / "images.csv")
+    done = {str(row.get("image") or "") for row in image_rows}
+    rows = [row for row in load_csv(output / "tiles.csv") if str(row.get("image") or "") in done]
+    return rows, image_rows
+
+
+def checkpoint(
+    output: Path,
+    rows: list[dict[str, object]],
+    image_rows: list[dict[str, object]],
+    total: int,
+    image: str,
+) -> None:
+    write_csv(output / "tiles.csv", TILE_FIELDS, rows)
+    write_csv(output / "images.csv", IMAGE_FIELDS, image_rows)
+    progress = output / "segment_progress.json"
+    tmp = progress.with_name(progress.name + ".tmp")
+    tmp.write_text(json.dumps({"done": len(image_rows), "total": total, "image": image}) + "\n")
+    tmp.replace(progress)
 
 
 def list_images(folder: Path) -> list[Path]:
@@ -72,7 +132,11 @@ def prepare_tensor(
     height: int,
     width: int,
     center_heatmap,
-) -> torch.Tensor:
+):
+    import torch
+    from torchvision.transforms import InterpolationMode
+    from torchvision.transforms import functional as TF
+
     original_width, original_height = image.size
     resized = TF.resize(
         image,
@@ -167,6 +231,8 @@ def contact_sheet(paths: list[Path], columns: int = 6, cell: int = 192) -> Image
 
 
 def main() -> None:
+    import torch
+
     args = parse_args()
     project = Path(args.project).resolve()
     sys.path.insert(0, str(project / "src"))
@@ -211,7 +277,10 @@ def main() -> None:
     crop_dir = output / "plant_crops"
     tile_dir = output / "tiles"
     sheet_dir = output / "contact_sheets"
-    for folder in (mask_dir, overlay_dir, overlay_review_dir, crop_dir, tile_dir, sheet_dir):
+    folders = [mask_dir, crop_dir, tile_dir]
+    if not args.skip_previews:
+        folders.extend((overlay_dir, overlay_review_dir, sheet_dir))
+    for folder in folders:
         folder.mkdir(parents=True, exist_ok=True)
 
     # Same loader as scripts/benchmark_center_birefnet_20.py. create_center_model
@@ -227,11 +296,14 @@ def main() -> None:
     if unexpected:
         raise RuntimeError(f"Unexpected Center BiRefNet tensors: {unexpected[:5]}")
     model = model.float().to(device).eval()
-    rows: list[dict[str, object]] = []
-    image_rows: list[dict[str, object]] = []
+    rows, image_rows = load_resume_state(output) if args.resume else ([], [])
+    done_images = {str(row.get("image") or "") for row in image_rows}
 
     with torch.inference_mode():
         for index, path in enumerate(images, start=1):
+            if path.name in done_images:
+                print(f"[{index:02d}/{len(images)}] {path.name}: resume skip", flush=True)
+                continue
             image = load_upright(path)
             width, height = image.size
             rgb = np.asarray(image)
@@ -253,6 +325,35 @@ def main() -> None:
             Image.fromarray(mask.astype(np.uint8) * 255, mode="L").save(
                 mask_dir / f"{path.stem}.mask.png"
             )
+
+            if not mask.any():
+                image_rows.append(
+                    {
+                        "image": path.name,
+                        "width": width,
+                        "height": height,
+                        "seed_x": round(seed_x, 1),
+                        "seed_y": round(seed_y, 1),
+                        "seed_method": seed_method,
+                        "mask_used": "empty",
+                        "selected_frac": round(float(selected.mean()), 4),
+                        "balanced_frac": round(float(balanced.mean()), 4),
+                        "box_x0": 0,
+                        "box_y0": 0,
+                        "box_x1": 0,
+                        "box_y1": 0,
+                        "box_w": 0,
+                        "box_h": 0,
+                        "tiles_generated": 0,
+                        "tiles_kept": 0,
+                    }
+                )
+                print(
+                    f"[{index:02d}/{len(images)}] {path.name}: empty mask, skipped",
+                    flush=True,
+                )
+                checkpoint(output, rows, image_rows, len(images), path.name)
+                continue
 
             x0, y0, x1, y1 = bbox(mask, BBOX_PAD)
             box_w, box_h = x1 - x0, y1 - y0
@@ -315,11 +416,12 @@ def main() -> None:
                         }
                     )
 
-            drawn.save(overlay_dir / f"{path.stem}_overlay.jpg", quality=90)
-            review = drawn.copy()
-            review.thumbnail((1600, 1600))
-            review.save(overlay_review_dir / f"{path.stem}_overlay.jpg", quality=85)
-            contact_sheet(kept_paths).save(sheet_dir / f"{path.stem}_tiles.jpg", quality=85)
+            if not args.skip_previews:
+                drawn.save(overlay_dir / f"{path.stem}_overlay.jpg", quality=90)
+                review = drawn.copy()
+                review.thumbnail((1600, 1600))
+                review.save(overlay_review_dir / f"{path.stem}_overlay.jpg", quality=85)
+                contact_sheet(kept_paths).save(sheet_dir / f"{path.stem}_tiles.jpg", quality=85)
 
             image_rows.append(
                 {
@@ -348,17 +450,12 @@ def main() -> None:
                 f"mask={mask_name} seed={seed_method}",
                 flush=True,
             )
+            checkpoint(output, rows, image_rows, len(images), path.name)
 
-    tiles_csv = output / "tiles.csv"
-    with tiles_csv.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()) if rows else ["image"])
-        writer.writeheader()
-        writer.writerows(rows)
-    images_csv = output / "images.csv"
-    with images_csv.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(image_rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(image_rows)
+    write_csv(output / "tiles.csv", TILE_FIELDS, rows)
+    write_csv(output / "images.csv", IMAGE_FIELDS, image_rows)
+    if not image_rows:
+        raise RuntimeError("No photographs were segmented.")
 
     kept = [int(row["tiles_kept"]) for row in image_rows]
     summary = {

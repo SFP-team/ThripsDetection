@@ -15,7 +15,6 @@ from pydantic import BaseModel, Field
 from annotator.config import DATA, ROOT, load_settings, public_settings
 from annotator.db import (
     add_label,
-    find_ready_batch,
     get_batch,
     get_tile,
     init_db,
@@ -29,7 +28,28 @@ from annotator.db import (
 )
 from annotator.export_merge import EXPORT_FIELDS
 from annotator.gpu_jobs import export_batch_to_gpu, start_gpu_session, start_gpu_session_from_upload
-from annotator.pipeline import get_job, start_import
+from annotator.pipeline import get_job
+from annotator.predict_jobs import (
+    compare_run_to_deployment,
+    export_plants,
+    export_tiles,
+    get_prediction_job,
+    iter_remote_file,
+    list_prediction_runs,
+    media_content_type,
+    plant_detail,
+    read_run,
+    resolve_prediction_media,
+    resume_running_prediction_jobs,
+    start_final_test_repro,
+    start_prediction_from_path,
+    start_prediction_from_remote_path,
+    start_prediction_from_tiled,
+    start_prediction_from_tiled_upload,
+    start_prediction_from_upload,
+)
+from annotator.predict_report import EXPORT_FIELDS as PREDICT_EXPORT_FIELDS
+from annotator.predict_report import TILE_EXPORT_FIELDS
 from annotator.sessions import (
     ensure_legacy_sessions,
     list_sessions,
@@ -44,36 +64,6 @@ app = FastAPI(title="Lab tile annotator")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 KIT_ONLY = "This copy only labels tiles already in the folder."
-
-
-class SettingsIn(BaseModel):
-    annotator: str | None = None
-    pipeline_mode: str | None = None
-    ssh_host: str | None = None
-    ssh_user: str | None = None
-    ssh_password: str | None = None
-    remote_project: str | None = None
-    remote_python: str | None = None
-    remote_work: str | None = None
-    remote_existing_run: str | None = None
-    local_existing_run: str | None = None
-    local_project: str | None = None
-    local_python: str | None = None
-    device: str | None = None
-    fold: int | None = None
-
-
-class ImportIn(BaseModel):
-    annotator: str = "lab"
-    name: str = ""
-    path: str = ""
-    remote: bool = True
-
-
-class PrepareIn(BaseModel):
-    annotator: str = "lab"
-    name: str = ""
-    path: str = ""
 
 
 class LabelIn(BaseModel):
@@ -105,6 +95,12 @@ class SessionGpuIn(BaseModel):
     path: str = Field(min_length=1)
 
 
+class PredictionPathIn(BaseModel):
+    annotator: str = Field(min_length=1)
+    name: str = ""
+    path: str = Field(min_length=1)
+
+
 def _require_gpu() -> None:
     settings = load_settings()
     if not settings.ssh_host or not settings.ssh_user or not settings.ssh_password:
@@ -116,6 +112,7 @@ def startup() -> None:
     init_db()
     DATA.mkdir(parents=True, exist_ok=True)
     ensure_legacy_sessions()
+    resume_running_prediction_jobs()
 
 
 def _index() -> FileResponse:
@@ -132,6 +129,12 @@ def how_to_annotate() -> FileResponse:
     return _index()
 
 
+@app.get("/predict")
+@app.get("/predict/{run_id}")
+def spa_predict(run_id: str | None = None) -> FileResponse:
+    return _index()
+
+
 @app.get("/batches/{batch_id}/label")
 @app.get("/batches/{batch_id}/review")
 def spa_batch(batch_id: int) -> FileResponse:
@@ -140,13 +143,12 @@ def spa_batch(batch_id: int) -> FileResponse:
 
 @app.get("/api/settings")
 def api_settings() -> dict[str, Any]:
-    payload = public_settings(load_settings())
-    payload["ready_batch_id"] = find_ready_batch()
-    return payload
+    return public_settings(load_settings())
 
 
 @app.post("/api/settings")
-def api_save_settings(body: SettingsIn) -> dict[str, Any]:
+def api_save_settings() -> dict[str, Any]:
+    """Kept for older clients. Settings are hand-placed files; nothing is saved here."""
     return public_settings(load_settings())
 
 
@@ -240,30 +242,219 @@ async def api_session_gpu_upload(
         raise HTTPException(400, str(exc)) from exc
 
 
-@app.post("/api/import")
-def api_import(body: ImportIn) -> dict[str, Any]:
+@app.post("/api/prediction-jobs/gpu")
+def api_prediction_gpu(body: PredictionPathIn) -> dict[str, Any]:
+    _require_gpu()
     try:
-        return start_import(
-            annotator=body.annotator,
-            name=body.name,
-            local_path=body.path,
-            use_remote=False,
-        )
-    except (FileNotFoundError, RuntimeError) as exc:
+        return start_prediction_from_path(body.annotator, body.name, body.path)
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
+@app.post("/api/prediction-jobs/remote")
+def api_prediction_remote(body: PredictionPathIn) -> dict[str, Any]:
+    _require_gpu()
+    try:
+        return start_prediction_from_remote_path(body.annotator, body.name, body.path)
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+async def _upload_relpaths(
+    files: list[UploadFile],
+    relpaths: list[str] | None,
+) -> list[tuple[str, bytes]]:
+    paths = relpaths if isinstance(relpaths, list) else ([relpaths] if relpaths else [])
+    payload: list[tuple[str, bytes]] = []
+    for index, upload in enumerate(files):
+        raw = upload.filename or ""
+        filename = Path(raw).name
+        if not filename:
+            continue
+        rel = paths[index] if index < len(paths) else (raw or filename)
+        payload.append((rel, await upload.read()))
+    return payload
+
+
+@app.post("/api/prediction-jobs/gpu-upload")
+async def api_prediction_gpu_upload(
+    annotator: str = Form(...),
+    name: str = Form(""),
+    files: list[UploadFile] = File(...),
+    relpaths: list[str] | None = Form(None),
+) -> dict[str, Any]:
+    _require_gpu()
+    payload = await _upload_relpaths(files, relpaths)
+    if not payload:
+        raise HTTPException(400, "Choose photographs or a folder of photographs.")
+    try:
+        return start_prediction_from_upload(annotator, name, payload)
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/prediction-jobs/tiled")
+def api_prediction_tiled(body: PredictionPathIn) -> dict[str, Any]:
+    _require_gpu()
+    try:
+        return start_prediction_from_tiled(body.annotator, body.name, body.path)
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/prediction-jobs/tiled-upload")
+async def api_prediction_tiled_upload(
+    annotator: str = Form(...),
+    name: str = Form(""),
+    files: list[UploadFile] = File(...),
+    relpaths: list[str] | None = Form(None),
+) -> dict[str, Any]:
+    _require_gpu()
+    payload = await _upload_relpaths(files, relpaths)
+    if not payload:
+        raise HTTPException(400, "Choose a tiled folder with tiles_foliage.csv.")
+    try:
+        return start_prediction_from_tiled_upload(annotator, name, payload)
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/prediction-jobs/repro")
+def api_prediction_repro(body: AnnotatorIn) -> dict[str, Any]:
+    _require_gpu()
+    try:
+        return start_final_test_repro(body.annotator)
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/prediction-jobs/{job_id}")
+def api_prediction_job(job_id: str) -> dict[str, Any]:
+    job = get_prediction_job(job_id)
+    if job is None:
+        raise HTTPException(404, "Prediction job not found")
+    return job
+
+
+@app.get("/api/prediction-runs")
+def api_prediction_runs() -> list[dict[str, Any]]:
+    return list_prediction_runs()
+
+
+@app.get("/api/prediction-runs/{run_id}")
+def api_prediction_run(run_id: str) -> dict[str, Any]:
+    meta = read_run(run_id)
+    if meta is None:
+        raise HTTPException(404, "Prediction run not found")
+    return meta
+
+
+@app.get("/api/prediction-runs/{run_id}/plants")
+def api_prediction_plants(
+    run_id: str,
+    high_frac: float = 0.20,
+    mid_frac: float = 0.30,
+) -> dict[str, Any]:
+    meta = read_run(run_id)
+    if meta is None:
+        raise HTTPException(404, "Prediction run not found")
+    return {"run": meta, "plants": export_plants(run_id, high_frac, mid_frac)}
+
+
+@app.get("/api/prediction-runs/{run_id}/plants/{image}")
+def api_prediction_plant(
+    run_id: str,
+    image: str,
+    high_frac: float = 0.20,
+    mid_frac: float = 0.30,
+) -> dict[str, Any]:
+    if read_run(run_id) is None:
+        raise HTTPException(404, "Prediction run not found")
+    try:
+        return plant_detail(run_id, image, high_frac, mid_frac)
+    except KeyError as exc:
+        raise HTTPException(404, "Plant not found") from exc
+
+
+@app.get("/api/prediction-runs/{run_id}/export")
+def api_prediction_export(
+    run_id: str,
+    level: str = "plants",
+    high_frac: float = 0.20,
+    mid_frac: float = 0.30,
+) -> StreamingResponse:
+    if read_run(run_id) is None:
+        raise HTTPException(404, "Prediction run not found")
+    if level == "tiles":
+        rows = export_tiles(run_id)
+        fields = TILE_EXPORT_FIELDS
+        filename = f"{run_id}_tile_predictions.csv"
+    else:
+        rows = export_plants(run_id, high_frac, mid_frac)
+        fields = PREDICT_EXPORT_FIELDS
+        filename = f"{run_id}_plant_severity.csv"
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return StreamingResponse(
+        io.BytesIO(buffer.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/prediction-runs/{run_id}/compare")
+def api_prediction_compare(run_id: str) -> dict[str, Any]:
+    if read_run(run_id) is None:
+        raise HTTPException(404, "Prediction run not found")
+    return compare_run_to_deployment(run_id)
+
+
+def _prediction_media(run_id: str, kind: str, name: str) -> FileResponse | StreamingResponse:
+    if read_run(run_id) is None:
+        raise HTTPException(404, "Prediction run not found")
+    try:
+        source, location = resolve_prediction_media(run_id, kind, name)
+        if source == "local":
+            path = Path(location)
+            if not path.exists():
+                raise FileNotFoundError(name)
+            return FileResponse(path)
+        body = iter_remote_file(str(location))
+    except FileNotFoundError as exc:
+        raise HTTPException(404, f"{kind} not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return StreamingResponse(
+        body,
+        media_type=media_content_type(name),
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@app.get("/media/predictions/{run_id}/original/{image}", response_model=None)
+def media_prediction_original(run_id: str, image: str) -> FileResponse | StreamingResponse:
+    return _prediction_media(run_id, "original", image)
+
+
+@app.get("/media/predictions/{run_id}/crop/{image}", response_model=None)
+def media_prediction_crop(run_id: str, image: str) -> FileResponse | StreamingResponse:
+    return _prediction_media(run_id, "crop", image)
+
+
+@app.get("/media/predictions/{run_id}/tile/{tile}", response_model=None)
+def media_prediction_tile(run_id: str, tile: str) -> FileResponse | StreamingResponse:
+    return _prediction_media(run_id, "tile", tile)
+
+
 @app.post("/api/prepare")
-def api_prepare(body: PrepareIn) -> dict[str, Any]:
+def api_prepare() -> dict[str, Any]:
     raise HTTPException(400, KIT_ONLY)
 
 
 @app.post("/api/prepare/upload")
-async def api_prepare_upload(
-    annotator: str = Form("lab"),
-    name: str = Form(""),
-    files: list[UploadFile] = File(...),
-) -> dict[str, Any]:
+def api_prepare_upload() -> dict[str, Any]:
     raise HTTPException(400, KIT_ONLY)
 
 

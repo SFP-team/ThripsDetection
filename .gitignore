@@ -7,3 +7,7 @@ __pycache__/
 *.db
 settings.json
 .DS_Store
+training/artifacts/
+training/model_cache/
+export/final_test_review_kit/
+export/review_thripsdetection/

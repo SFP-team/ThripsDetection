@@ -1,0 +1,13 @@
+# Install PyTorch/torchvision from the CUDA index appropriate for the server.
+# Known-good server pair: torch 2.6.0+cu124 and torchvision 0.21.0+cu124.
+transformers>=4.56,<6
+huggingface-hub>=0.34
+safetensors>=0.5
+pandas>=2.2,<3
+numpy>=1.26,<3
+scipy>=1.14,<2
+scikit-learn>=1.6,<2
+Pillow>=11,<13
+joblib>=1.4
+tqdm>=4.66
+

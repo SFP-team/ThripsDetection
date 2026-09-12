@@ -170,24 +170,6 @@ def list_batches() -> list[dict[str, Any]]:
         return batches
 
 
-def find_ready_batch() -> int | None:
-    with session() as conn:
-        row = conn.execute(
-            """
-            SELECT id FROM batches
-            WHERE status = 'ready'
-            ORDER BY id DESC
-            LIMIT 1
-            """
-        ).fetchone()
-        return int(row["id"]) if row else None
-
-
-def batch_count() -> int:
-    with session() as conn:
-        return int(conn.execute("SELECT COUNT(*) FROM batches").fetchone()[0])
-
-
 def get_batch(batch_id: int) -> dict[str, Any] | None:
     with session() as conn:
         row = conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()

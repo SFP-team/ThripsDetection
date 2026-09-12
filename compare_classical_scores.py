@@ -10,13 +10,10 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-HUMAN = [
-    5, 3, 4, 4, 3, 5, 4, 4, 2, 4, 2, 2, 2, 3, 1, 2,
-    4, 3, 3, 3, 4, 4, 2, 3, 4, 2, 3, 1, 2, 2, 1, 3, 3, 3, 4, 3,
-]
 SRC = Path("/home/fpt/Chili thrips detection pictures")
 RUN = SRC / "analysis_2026-08-17" / "birefnet_tiles"
 OUT = SRC / "analysis_2026-08-17" / "score_check"
+SCORES = Path(__file__).resolve().parent / "human_thrips_scores.csv"
 
 
 def offgreen_map(bgr, mask):
@@ -90,12 +87,22 @@ def spearman(a, b):
     return pearson(ranks(np.asarray(a, float)), ranks(np.asarray(b, float)))
 
 
+def load_human_scores(path: Path) -> dict[str, int]:
+    with path.open(newline="", encoding="utf-8") as handle:
+        return {row["image"]: int(row["human_score"]) for row in csv.DictReader(handle)}
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
+    scores = load_human_scores(SCORES)
     old = {r["file"]: r for r in csv.DictReader((SRC / "analysis_2026-08-17" / "maps" / "scores.csv").open())}
-    images = sorted(SRC.glob("IMG_*.JPG"))
+    images = [path for path in sorted(SRC.glob("IMG_*.JPG")) if path.name in scores]
+    missing = sorted(set(scores) - {path.name for path in images})
+    if missing:
+        raise RuntimeError(f"Scored photos not found under {SRC}: {missing}")
     rows = []
-    for human, path in zip(HUMAN, images):
+    for path in images:
+        human = scores[path.name]
         bgr = cv2.imread(str(path))
         if bgr is None:
             raise RuntimeError(path)
@@ -141,7 +148,7 @@ def main() -> None:
 
     human = [r["human"] for r in rows]
     summary = {
-        "n": 36,
+        "n": len(rows),
         "classical_rescaled_pearson": round(pearson(human, [r["classical_rescaled"] for r in rows]), 3),
         "classical_rescaled_spearman": round(spearman(human, [r["classical_rescaled"] for r in rows]), 3),
         "birefnet_offgreen_pearson": round(pearson(human, [r["birefnet_offgreen"] for r in rows]), 3),

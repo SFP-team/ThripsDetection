@@ -24,37 +24,54 @@ def image_set(rows: list[dict[str, Any]]) -> set[str]:
     return {str(row.get("image") or "") for row in rows if row.get("image")}
 
 
-def extras_to_append(
+def labeled_at(row: dict[str, Any]) -> str:
+    # ISO 8601 UTC strings from db.now_iso sort as text. A row with no
+    # timestamp counts as oldest so it never beats a dated mark.
+    return str(row.get("labeled_at") or "")
+
+
+def merge_rows(
     local_rows: list[dict[str, Any]],
     remote_rows: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    seen = {row_key(row) for row in remote_rows}
-    extras = []
+) -> dict[str, Any]:
+    """Merge local marks into the GPU rows. Per (image, tile) the newer labeled_at wins.
+
+    New tiles are appended. A GPU row is replaced only when the local mark is
+    strictly newer, so a retry of the same export changes nothing and a mark
+    someone else exported later is not clobbered.
+    """
+    merged = list(remote_rows)
+    index = {row_key(row): position for position, row in enumerate(merged)}
+    added: list[dict[str, Any]] = []
+    updated: list[dict[str, Any]] = []
+    kept: list[dict[str, Any]] = []
     for row in local_rows:
-        if row_key(row) in seen:
-            continue
-        extras.append(row)
-        seen.add(row_key(row))
-    return extras
+        key = row_key(row)
+        position = index.get(key)
+        if position is None:
+            index[key] = len(merged)
+            merged.append(row)
+            added.append(row)
+        elif labeled_at(row) > labeled_at(merged[position]):
+            merged[position] = row
+            updated.append(row)
+        else:
+            kept.append(merged[position])
+    return {"rows": merged, "added": added, "updated": updated, "kept": kept}
 
 
 def decide_export_action(
     local_rows: list[dict[str, Any]],
     remote_sets: list[tuple[str, list[dict[str, Any]]]],
 ) -> dict[str, Any]:
-    """Pick create, append, or a new folder. Never overwrite a GPU row."""
+    """Pick create, append, or a new folder for this export."""
     if not local_rows:
-        return {"action": "empty", "remote_path": None, "extras": []}
+        return {"action": "empty", "remote_path": None, "rows": []}
     if not remote_sets:
-        return {"action": "create", "remote_path": "labels.csv", "extras": local_rows}
+        return {"action": "create", "remote_path": "labels.csv", "rows": local_rows}
 
     local_images = image_set(local_rows)
     for path, remote_rows in remote_sets:
         if image_set(remote_rows) & local_images:
-            extras = extras_to_append(local_rows, remote_rows)
-            return {"action": "append", "remote_path": path, "extras": extras, "remote_rows": remote_rows}
-    return {"action": "new_folder", "remote_path": None, "extras": local_rows}
-
-
-def merged_rows(remote_rows: list[dict[str, Any]], extras: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return list(remote_rows) + list(extras)
+            return {"action": "append", "remote_path": path, **merge_rows(local_rows, remote_rows)}
+    return {"action": "new_folder", "remote_path": None, "rows": local_rows}

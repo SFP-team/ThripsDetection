@@ -22,7 +22,6 @@ from annotator.export_merge import EXPORT_FIELDS
 from annotator.pipeline import ingest_run
 
 SESSIONS = DATA / "sessions"
-LAST_PATH = DATA / "last_session.json"
 
 
 def now_iso() -> str:
@@ -39,16 +38,16 @@ def export_dir(key: str) -> Path:
     return path
 
 
-def make_key(name: str) -> str:
+def make_key(name: str, root: Path | None = None) -> str:
+    """Unique `{stamp}_{slug}` key. `root` is the folder the key will live under."""
+    base = SESSIONS if root is None else root
     slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", (name or "session").strip()).strip("-")
     slug = (slug or "session")[:40]
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     key = f"{stamp}_{slug}"
-    dest = session_dir(key)
     suffix = 2
-    while dest.exists():
+    while (base / key).exists():
         key = f"{stamp}_{slug}-{suffix}"
-        dest = session_dir(key)
         suffix += 1
     return key
 
@@ -87,16 +86,6 @@ def read_meta(key: str) -> dict[str, Any] | None:
     if not path.exists():
         return None
     return json.loads(path.read_text())
-
-
-def set_last_session(key: str, batch_id: int) -> None:
-    LAST_PATH.write_text(json.dumps({"session_key": key, "batch_id": batch_id}) + "\n")
-
-
-def last_session() -> dict[str, Any] | None:
-    if not LAST_PATH.exists():
-        return None
-    return json.loads(LAST_PATH.read_text())
 
 
 def ensure_legacy_sessions() -> None:
@@ -170,7 +159,6 @@ def finish_tile_session(annotator: str, label: str, key: str, run_root: Path, so
             "source": source,
         },
     )
-    set_last_session(key, batch_id)
     return {"batch_id": batch_id, "session_key": key, "tiles": count, "reused": False}
 
 
