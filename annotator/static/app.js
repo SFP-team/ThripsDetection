@@ -890,7 +890,6 @@ document.addEventListener("keydown", (event) => {
     const index = state.plant.findIndex((item) => item.id === state.tile.id);
     const prev = state.plant[index - 1];
     if (prev) openBatch(state.batch.id, prev.id, { fromReview: false, replace: true }).catch(flash);
-    else undo().catch(flash);
     return;
   }
   if (!state.draft.tissue) {
@@ -907,8 +906,9 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-const PREDICT_STEPS = ["sending", "segmenting", "filtering", "scoring_tiles", "aggregating_plants", "ready"];
+const PREDICT_STEPS = ["waiting", "sending", "segmenting", "filtering", "scoring_tiles", "aggregating_plants", "ready"];
 const PREDICT_TITLES = {
+  waiting: "Waiting for a free GPU",
   sending: "Sending photographs to the GPU",
   segmenting: "Finding and cutting out each plant",
   filtering: "Keeping leaf tiles",
@@ -926,7 +926,10 @@ function paintPredictGpu() {
   const tiledHint = ready
     ? "Use this only when the folder already has tiles_foliage.csv and foliage tiles. Raw rover photos belong on the left."
     : "GPU password is not set on this computer. Ask for a local settings file.";
-  for (const id of ["form-predict-gpu", "form-predict-tiled"]) {
+  const remoteHint = ready
+    ? "Photographs stay on the server. This computer only pulls scores. Open a plant to load that photograph."
+    : "GPU password is not set on this computer. Ask for a local settings file.";
+  for (const id of ["form-predict-gpu", "form-predict-tiled", "form-predict-remote"]) {
     const card = $(id);
     if (card) card.classList.toggle("is-off", !ready);
   }
@@ -938,11 +941,14 @@ function paintPredictGpu() {
     "predict-tiled-path",
     "predict-tiled-path-btn",
     "predict-tiled-folder-input",
+    "predict-remote-path",
+    "predict-remote-path-btn",
   ]) {
     if ($(id)) $(id).disabled = !ready;
   }
   if ($("predict-gpu-hint")) $("predict-gpu-hint").textContent = hint;
   if ($("predict-tiled-hint")) $("predict-tiled-hint").textContent = tiledHint;
+  if ($("predict-remote-hint")) $("predict-remote-hint").textContent = remoteHint;
 }
 
 function predictName() {
@@ -1116,7 +1122,10 @@ function renderPredictTable() {
         <td>${row.severity_group || "Could not score"}</td>
         <td>${failedRow ? "—" : `${Math.round((row.confidence || 0) * 100)}%`}</td>
         <td>${row.priority_group ? `<span class="chip ${row.priority_group}">${row.priority_group}</span>` : "—"}</td>
-        <td>${review ? "Review" : ""}</td>
+        <td class="predict-actions">
+          <button type="button" class="predict-open">Open</button>
+          ${review ? `<span class="chip review">Needs review</span>` : ""}
+        </td>
       </tr>`;
     })
     .join("");
@@ -1150,11 +1159,12 @@ async function openPredictPlant(image) {
   const warning = plant.warning || (plant.needs_review ? "Low confidence. Review this plant before using the rank." : "");
   $("predict-detail-warning").hidden = !warning;
   $("predict-detail-warning").textContent = warning;
-  const hasTiles = plant.status === "scored" && (payload.tiles || []).some((tile) => tile.tile);
   const hasCrop = Boolean(payload.media?.has_crop && payload.media.crop);
+  const hasOriginal = Boolean(payload.media?.has_original && payload.media.original);
+  const hasTileImages = Boolean(payload.media?.has_tile_images);
   const evidence = $("predict-evidence");
   if (evidence) {
-    evidence.classList.toggle("no-original", !payload.media?.has_original);
+    evidence.classList.toggle("no-original", !hasOriginal);
     evidence.classList.toggle("no-crop", !hasCrop);
   }
   const originalStage = $("predict-original-stage");
@@ -1188,13 +1198,23 @@ async function openPredictPlant(image) {
        <p>Rounded score ${plant.predicted_score}</p>
        <p>Confidence ${Math.round((plant.confidence || 0) * 100)}%</p>
        ${probRows("score", [1, 2, 3, 4, 5].map((score) => [`${score}`, plant[`p_score_${score}`]]))}`;
+  const missing = $("predict-media-missing");
+  if (missing) {
+    const noPhotos = !hasCrop && !hasOriginal && !hasTileImages;
+    missing.hidden = !noPhotos;
+    missing.textContent = noPhotos
+      ? "This ranking has scores only. The plant photographs were not copied from the GPU, so there is nothing to show here."
+      : "";
+  }
   const evidenceTiles = payload.evidence || [];
-  if ($("predict-evidence-block")) $("predict-evidence-block").hidden = evidenceTiles.length === 0;
-  $("predict-evidence-tiles").innerHTML = evidenceTiles
-    .map((tile) => `<button type="button" data-tile="${encodeURIComponent(tile.tile)}" title="${tile.tile}">
-      <img src="${tile.url || `/media/predictions/${encodeURIComponent(runId)}/tile/${encodeURIComponent(tile.tile)}`}" alt="${tile.tile}">
-    </button>`)
-    .join("");
+  if ($("predict-evidence-block")) $("predict-evidence-block").hidden = evidenceTiles.length === 0 || !hasTileImages;
+  $("predict-evidence-tiles").innerHTML = hasTileImages
+    ? evidenceTiles
+      .map((tile) => `<button type="button" data-tile="${encodeURIComponent(tile.tile)}" title="${tile.tile}">
+        <img src="${tile.url || `/media/predictions/${encodeURIComponent(runId)}/tile/${encodeURIComponent(tile.tile)}`}" alt="${tile.tile}">
+      </button>`)
+      .join("")
+    : "";
   $("predict-tile-prob").hidden = true;
   requestAnimationFrame(drawPredictOverlay);
 }
@@ -1231,13 +1251,6 @@ function tileOnCrop(tile) {
   const bottom = Math.min(srcH, y + h);
   if (right - left < 1 || bottom - top < 1) return null;
   return { x: left, y: top, w: right - left, h: bottom - top };
-}
-
-function damageColor(healthy, mild, severe) {
-  const expected = mild + 2 * severe;
-  if (expected >= 1.35) return [220, 20, 20];
-  if (expected >= 0.70) return [240, 180, 0];
-  return [20, 150, 48];
 }
 
 function tileMediaUrl(tile) {
@@ -1292,7 +1305,7 @@ async function buildPlantView() {
   recon.height = height;
   overlay.width = width;
   overlay.height = height;
-  recon.getContext("2d").drawImage(cropImage, 0, 0, width, height);
+  recon.getContext("2d", { willReadFrequently: true }).drawImage(cropImage, 0, 0, width, height);
   state.plantView = {
     width,
     height,
@@ -1305,35 +1318,149 @@ async function buildPlantView() {
   paintPlantHeatmap();
 }
 
-function paintPlantTileRails(ctx, view) {
+function tileDamageClass(tile) {
+  const flush = Number(tile.p_flush || 0);
+  if (flush < 0.22) return 0;
+  const expected = Number(tile.p_mild || 0) + 2 * Number(tile.p_severe || 0);
+  if (expected >= 1.35) return 2;
+  if (expected >= 0.70) return 1;
+  return 0;
+}
+
+// Background test, not a green test. Bronzed, silvered, and pale flush must
+// stay paintable: that is where severe damage shows. Only plastic, sky, gray,
+// and near-black pixels are skipped. Bright low-saturation pixels count as
+// tube only in the lower part of the plant box (same TUBE_Y_FRAC rule as
+// filter_tube_tiles.py); silvered tips at the top look the same in RGB.
+const TUBE_Y_FRAC = 0.55;
+
+function isLeafPixel(r, g, b, lower) {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  if (max < 40) return false;
+  const saturation = (max - min) / max;
+  if (lower && max > 183 && saturation < 0.22) return false;
+  if (!lower && max > 225 && saturation < 0.08) return false;
+  if (max > 120 && saturation < 0.06) return false;
+  if (b > g && b > r && b > 90) return false;
+  return true;
+}
+
+function leafMajority(photo, width, height, x, y) {
+  const lower = y / height >= TUBE_Y_FRAC;
+  let hits = 0;
+  for (let dy = -1; dy <= 1; dy += 1) {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      const xx = x + dx;
+      const yy = y + dy;
+      if (xx < 0 || yy < 0 || xx >= width || yy >= height) continue;
+      const p = (yy * width + xx) * 4;
+      if (isLeafPixel(photo[p], photo[p + 1], photo[p + 2], lower)) hits += 1;
+    }
+  }
+  return hits >= 5;
+}
+
+function softenDamageLabels(labels, width, height, radius) {
+  const count = width * height;
+  const src = new Float32Array(count);
+  for (let i = 0; i < count; i += 1) src[i] = labels[i];
+  const tmp = new Float32Array(count);
+  const out = new Uint8Array(count);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let sum = 0;
+      let n = 0;
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        const xx = x + dx;
+        if (xx < 0 || xx >= width) continue;
+        sum += src[y * width + xx];
+        n += 1;
+      }
+      tmp[y * width + x] = sum / n;
+    }
+  }
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let sum = 0;
+      let n = 0;
+      for (let dy = -radius; dy <= radius; dy += 1) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= height) continue;
+        sum += tmp[yy * width + x];
+        n += 1;
+      }
+      const value = sum / n;
+      if (value >= 1.45) out[y * width + x] = 2;
+      else if (value >= 0.42) out[y * width + x] = 1;
+      else out[y * width + x] = 0;
+    }
+  }
+  return out;
+}
+
+function paintPlantLeafWash(ctx, view) {
+  const recon = $("predict-reconstruct");
+  if (!recon || recon.width !== view.width || recon.height !== view.height) return;
+  const photo = recon.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, view.width, view.height);
+  const labels = new Uint8Array(view.width * view.height);
   const scaleX = view.width / view.cropW;
   const scaleY = view.height / view.cropH;
-  const rail = Math.max(5, Math.round(view.width / 90));
+  let selectedRect = null;
   for (const tile of state.plantDetail?.tiles || []) {
-    const flush = Number(tile.p_flush || 0);
-    if (flush < 0.22) continue;
+    const cls = tileDamageClass(tile);
+    if (!cls) continue;
     const rect = tileOnCrop(tile);
     if (!rect) continue;
-    const x = (rect.x - view.x0) * scaleX;
-    const y = (rect.y - view.y0) * scaleY;
-    const w = rect.w * scaleX;
-    const h = rect.h * scaleY;
-    const [r, g, b] = damageColor(
-      Number(tile.p_healthy || 0),
-      Number(tile.p_mild || 0),
-      Number(tile.p_severe || 0)
-    );
-    const color = `rgb(${r}, ${g}, ${b})`;
-    ctx.fillStyle = color;
-    ctx.globalAlpha = 0.1;
-    ctx.fillRect(x, y, w, h);
-    ctx.globalAlpha = 0.92;
-    ctx.fillRect(x, y, rail, h);
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = state.selectedTile === tile.tile ? Math.max(4, view.width / 160) : Math.max(2, view.width / 260);
-    ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+    const x0 = Math.max(0, Math.floor((rect.x - view.x0) * scaleX));
+    const y0 = Math.max(0, Math.floor((rect.y - view.y0) * scaleY));
+    const x1 = Math.min(view.width, Math.ceil((rect.x + rect.w - view.x0) * scaleX));
+    const y1 = Math.min(view.height, Math.ceil((rect.y + rect.h - view.y0) * scaleY));
+    if (state.selectedTile === tile.tile) selectedRect = { x0, y0, x1, y1 };
+    for (let y = y0; y < y1; y += 1) {
+      const row = y * view.width;
+      for (let x = x0; x < x1; x += 1) {
+        const i = row + x;
+        if (cls > labels[i]) labels[i] = cls;
+      }
+    }
   }
+  const radius = Math.max(3, Math.round(view.width / 140));
+  const soft = softenDamageLabels(labels, view.width, view.height, radius);
+  const out = ctx.createImageData(view.width, view.height);
+  const pixels = out.data;
+  const photoPx = photo.data;
+  for (let y = 0; y < view.height; y += 1) {
+    for (let x = 0; x < view.width; x += 1) {
+      const i = y * view.width + x;
+      const cls = soft[i];
+      if (!cls) continue;
+      const p = i * 4;
+      if (!leafMajority(photoPx, view.width, view.height, x, y)) continue;
+      let edge = false;
+      if (x === 0 || y === 0 || x === view.width - 1 || y === view.height - 1) {
+        edge = true;
+      } else {
+        for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          const j = (y + dy) * view.width + (x + dx);
+          const q = j * 4;
+          if (soft[j] !== cls || !leafMajority(photoPx, view.width, view.height, x + dx, y + dy)) {
+            edge = true;
+            break;
+          }
+        }
+      }
+      const selected = selectedRect
+        && x >= selectedRect.x0 && x < selectedRect.x1
+        && y >= selectedRect.y0 && y < selectedRect.y1;
+      const alpha = edge ? 165 : selected ? 115 : 72;
+      pixels[p] = cls === 2 ? 220 : 240;
+      pixels[p + 1] = cls === 2 ? 20 : 180;
+      pixels[p + 2] = cls === 2 ? 20 : 0;
+      pixels[p + 3] = alpha;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
 }
 
 function paintPlantHeatmap() {
@@ -1344,7 +1471,7 @@ function paintPlantHeatmap() {
   overlay.height = view.height;
   const ctx = overlay.getContext("2d");
   ctx.clearRect(0, 0, view.width, view.height);
-  paintPlantTileRails(ctx, view);
+  paintPlantLeafWash(ctx, view);
 }
 
 function drawPredictOverlay() {
@@ -1409,6 +1536,25 @@ async function startPredictFromPath() {
     return;
   }
   const job = await api("/api/prediction-jobs/gpu", {
+    method: "POST",
+    body: JSON.stringify({ annotator: name, name: predictRunName(), path }),
+  });
+  await watchPredictionJob(job.job_id, job.run_id);
+}
+
+async function startPredictFromRemotePath() {
+  const name = predictName();
+  if (!name) return;
+  if (!gpuReady()) {
+    flash({ message: "GPU password is not set on this computer." });
+    return;
+  }
+  const path = $("predict-remote-path").value.trim();
+  if (!path) {
+    flash({ message: "Paste the folder path on the GPU." });
+    return;
+  }
+  const job = await api("/api/prediction-jobs/remote", {
     method: "POST",
     body: JSON.stringify({ annotator: name, name: predictRunName(), path }),
   });
@@ -1543,6 +1689,16 @@ $("form-predict-tiled")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
     await startPredictFromTiled();
+  } catch (error) {
+    flash(error);
+    showPredictPanel("upload");
+  }
+});
+
+$("form-predict-remote")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await startPredictFromRemotePath();
   } catch (error) {
     flash(error);
     showPredictPanel("upload");

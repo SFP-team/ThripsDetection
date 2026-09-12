@@ -33,7 +33,7 @@ While someone labels, there is **no live GPU connection**. No GPU job queue. One
 
 GPU slot for now is **`annotator_1` only**. Do not add `annotator_2` unless asked.
 
-Never reuse an old tiled run by matching JPG names on the GPU path. `_reuse_existing` in `annotator/pipeline.py` is for the old prepare flow. The GPU photos path must not call it.
+Never reuse an old tiled run by matching JPG names on the GPU path. Every GPU photos job segments the uploaded photos fresh into a new job folder.
 
 ## Setup on an annotator computer
 
@@ -171,7 +171,6 @@ annotator/data/
   settings.json          # optional, hand-given
   .env                   # optional, hand-given
   labels.db              # SQLite: batches, images, tiles, labels, undo_stack
-  last_session.json      # last session_key + batch_id
   jobs/<job_id>.json     # GPU job progress (also kept in memory)
   cache/existing_run/    # optional local copy of the 627-tile birefnet run
   sessions/<session_key>/
@@ -267,10 +266,12 @@ Export to GPU then:
 |---|---|
 | No local labels | `empty` — do not write remote |
 | No remote CSV | `create` `exports/labels.csv` |
-| Remote CSV exists and **image names overlap** | `append` local `(image, tile)` pairs not already there |
-| Same tile, different mark | **keep the GPU row** |
+| Remote CSV exists and **image names overlap** | `append`: new `(image, tile)` pairs are added |
+| Same tile on both sides | the row with the **newer `labeled_at`** wins; a tie keeps the GPU row |
 | Remote CSV exists, **no image overlap** | `new_folder` `exports/<session_key>/labels.csv` |
-| Retry | same compare/append (resume) |
+| Retry | same compare and merge; an identical export changes nothing |
+
+A relabel made after an export therefore reaches the GPU on the next export. A mark someone else exported later than yours is not clobbered.
 
 Implementation: `annotator/export_merge.py`. Tests: `annotator/tests/test_export_merge.py`.
 
@@ -309,7 +310,7 @@ Implementation: `annotator/export_merge.py`. Tests: `annotator/tests/test_export
 
 - Score tiles 1–5
 - Change storage keys without a migration plan
-- Call `_reuse_existing` from the GPU photos path
+- Reuse an old tiled run by matching JPG names; every GPU photos job cuts fresh
 - Write GPU exports except from Export to GPU
 - Build a shared live GPU URL as the main workflow
 - Add a GPU queue or `annotator_2` unless asked

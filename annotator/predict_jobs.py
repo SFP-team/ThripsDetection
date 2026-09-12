@@ -5,10 +5,11 @@ import json
 import shutil
 import tarfile
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import quote
 
 from annotator.config import DATA, REPO, Settings, load_settings
@@ -31,11 +32,14 @@ RAW_TILED_HINT = "That folder is already tiled. Use Existing tiled run, not raw 
 TILED_MISSING = "This folder has no tiled leaf squares (tiles_foliage.csv)."
 
 REMOTE_TRAINING = "/home/fpt/ThripsDetection"
+TRAINING_PYTHON = f"{REMOTE_TRAINING}/.training-venv/bin/python"
 MODEL_ROOT = f"{REMOTE_TRAINING}/training/artifacts/facebook__dinov3-vits16-pretrain-lvd1689m"
 PLANT_MODEL = f"{REMOTE_TRAINING}/training/artifacts/plant_model/model.joblib"
 FINAL_TEST_DEPLOYMENT = f"{REMOTE_TRAINING}/training/artifacts/final_test/deployment_predictions.csv"
+REMOTE_PREDICTION_STORE = f"{REMOTE_TRAINING}/prediction_runs"
 
 STEP_DETAIL = {
+    "waiting": "Waiting for a free GPU",
     "sending": "Sending photographs to the GPU",
     "segmenting": "Finding and cutting out each plant",
     "filtering": "Keeping leaf tiles",
@@ -45,18 +49,23 @@ STEP_DETAIL = {
     "error": "Something went wrong",
 }
 
-DOWNLOAD_NAMES = (
+CSV_DOWNLOAD_NAMES = (
     "tiles_foliage.csv",
     "images.csv",
     "tile_predictions.csv",
     "plant_features.csv",
     "plant_severity.csv",
-    "foliage_tiles",
-    "plant_crops",
     "predict.log",
     "deployment_predictions.csv",
     "test_tiles.csv",
+    "progress.json",
+    "segment_progress.json",
 )
+MEDIA_DOWNLOAD_NAMES = (
+    "foliage_tiles",
+    "plant_crops",
+)
+DOWNLOAD_NAMES = CSV_DOWNLOAD_NAMES + MEDIA_DOWNLOAD_NAMES
 
 
 def now_iso() -> str:
@@ -297,6 +306,18 @@ def plant_tiles(run_id: str, image: str) -> list[dict[str, Any]]:
         for row in keep_tile_rows(_read_csv(incoming / "tiles_foliage.csv"))
         if row.get("image") == image
     ]
+    if not foliage:
+        foliage = [
+            row
+            for row in keep_tile_rows(_read_csv(incoming / "test_tiles.csv"))
+            if row.get("image") == image
+        ]
+    if not foliage:
+        foliage = [
+            row
+            for row in _read_csv(incoming / "test_tiles.csv")
+            if row.get("image") == image
+        ]
     merged: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row in foliage:
@@ -431,6 +452,76 @@ def start_prediction_from_path(annotator: str, name: str, folder: str) -> dict[s
     return _start_job(annotator, name or Path(folder).name, "photos", settings, photos=photos)
 
 
+def start_prediction_from_remote_path(annotator: str, name: str, folder: str) -> dict[str, Any]:
+    settings = load_settings()
+    _require_gpu(settings)
+    remote_images, count = inspect_remote_raw_folder(settings, folder)
+    return _start_job(
+        annotator,
+        name or Path(remote_images).name,
+        "remote_photos",
+        settings,
+        remote_images=remote_images,
+        image_count=count,
+    )
+
+
+def inspect_remote_raw_folder(settings: Settings, folder: str) -> tuple[str, int]:
+    remote = _safe_remote_dir(folder)
+    ssh = _ssh_client(settings)
+    try:
+        out = _ssh_exec(
+            ssh,
+            (
+                f"{_q(settings.remote_python)} - <<'PY'\n"
+                "from pathlib import Path\n"
+                f"folder = Path({remote!r})\n"
+                "suffixes = {'.jpg', '.jpeg', '.png'}\n"
+                "if not folder.is_dir():\n"
+                "    print('MISSING')\n"
+                "elif (folder / 'tiles_foliage.csv').exists():\n"
+                "    print('TILED')\n"
+                "else:\n"
+                "    names = [p.name for p in folder.iterdir() if p.is_file() and p.suffix.lower() in suffixes]\n"
+                "    dups = len(names) - len(set(names))\n"
+                "    print(f'OK {len(names)} {dups}')\n"
+                "PY"
+            ),
+        ).strip().splitlines()
+    finally:
+        ssh.close()
+    line = (out[-1] if out else "").strip()
+    if line == "MISSING":
+        raise FileNotFoundError(f"Folder not found on the GPU: {remote}")
+    if line == "TILED":
+        raise RuntimeError(RAW_TILED_HINT)
+    if not line.startswith("OK "):
+        raise RuntimeError(f"Could not inspect the GPU folder: {line or 'empty reply'}")
+    parts = line.split()
+    count = int(parts[1])
+    dups = int(parts[2])
+    if count == 0:
+        raise FileNotFoundError(f"No JPG/PNG files in {remote}")
+    if dups:
+        raise RuntimeError(f"Duplicate filename in this upload: {remote}")
+    return remote, count
+
+
+def _safe_remote_dir(folder: str) -> str:
+    text = (folder or "").strip()
+    path = Path(text)
+    if not text or not path.is_absolute() or ".." in path.parts:
+        raise ValueError("Paste an absolute folder path on the GPU, for example /home/fpt/ThripsDetection/RoverImages.")
+    return path.as_posix()
+
+
+def _safe_leaf_name(name: str) -> str:
+    cleaned = Path(name).name
+    if not cleaned or cleaned in {".", ".."}:
+        raise ValueError("Invalid file name")
+    return cleaned
+
+
 def start_prediction_from_upload(
     annotator: str,
     name: str,
@@ -441,7 +532,7 @@ def start_prediction_from_upload(
     settings = load_settings()
     _require_gpu(settings)
     label = name.strip() or (Path(files[0][0]).parts[0] if files else "Prediction")
-    run_id = make_key(label)
+    run_id = make_key(label, PREDICTIONS)
     photos = save_uploaded_photos(run_id, files)
     return _start_job(annotator, label, "photos", settings, photos=photos, run_id=run_id)
 
@@ -469,7 +560,7 @@ def start_prediction_from_tiled_upload(
     settings = load_settings()
     _require_gpu(settings)
     label = name.strip() or (Path(files[0][0]).parts[0] if files else "Tiled prediction")
-    run_id = make_key(label)
+    run_id = make_key(label, PREDICTIONS)
     dest = incoming_dir(run_id)
     if dest.exists():
         shutil.rmtree(dest)
@@ -496,14 +587,17 @@ def _start_job(
     photos: list[Path] | None = None,
     tiled_dir: Path | None = None,
     run_id: str | None = None,
+    remote_images: str | None = None,
+    image_count: int | None = None,
 ) -> dict[str, Any]:
     label = name.strip() or "Prediction"
-    key = run_id or make_key(label)
+    key = run_id or make_key(label, PREDICTIONS)
     run_dir(key).mkdir(parents=True, exist_ok=True)
     if photos and source == "photos" and not all(path.parent == photos_dir(key) for path in photos):
         photos = copy_photos(key, photos)
     job_id = uuid.uuid4().hex[:12]
     created = now_iso()
+    first_step = "waiting" if source == "remote_photos" else "sending"
     write_run(
         key,
         {
@@ -514,21 +608,23 @@ def _start_job(
             "created_at": created,
             "status": "running",
             "source": source,
-            "images": len(photos or []),
+            "images": image_count if image_count is not None else len(photos or []),
+            "remote_images": remote_images,
+            "media_source": "remote" if source == "remote_photos" else "local",
         },
     )
     PREDICTION_JOBS[job_id] = _job_payload(
         "running",
-        "sending",
-        STEP_DETAIL["sending"],
+        first_step,
+        STEP_DETAIL[first_step],
         session_key=key,
         run_id=key,
         source=source,
     )
-    _update_job(job_id, key, status="running", step="sending", detail=STEP_DETAIL["sending"])
+    _update_job(job_id, key, status="running", step=first_step, detail=STEP_DETAIL[first_step])
     thread = threading.Thread(
         target=_run_prediction_job,
-        args=(job_id, key, source, photos or [], tiled_dir, settings),
+        args=(job_id, key, source, photos or [], tiled_dir, settings, remote_images),
         daemon=True,
     )
     thread.start()
@@ -542,6 +638,7 @@ def _run_prediction_job(
     photos: list[Path],
     tiled_dir: Path | None,
     settings: Settings,
+    remote_images: str | None = None,
 ) -> None:
     try:
         ssh = _ssh_client(settings)
@@ -550,11 +647,16 @@ def _run_prediction_job(
             if transport is not None:
                 transport.set_keepalive(30)
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            remote_root = prediction_remote_root(settings)
+            remote_root = (
+                REMOTE_PREDICTION_STORE if source == "remote_photos" else prediction_remote_root(settings)
+            )
             remote_job = f"{remote_root}/{stamp}-{job_id}"
             remote_run = f"{remote_job}/run"
             meta = read_run(run_id) or {}
             meta["remote_job"] = remote_job
+            meta["remote_run"] = remote_run
+            if remote_images:
+                meta["remote_images"] = remote_images
             write_run(run_id, meta)
             if source == "repro":
                 remote_run = _run_repro_remote(ssh, job_id, run_id, remote_job, settings)
@@ -563,45 +665,136 @@ def _run_prediction_job(
                     raise RuntimeError("Tiled folder is missing.")
                 _upload_tiled_run(ssh, job_id, run_id, tiled_dir, remote_job, remote_run, settings)
                 _run_remote_predict(ssh, job_id, run_id, remote_run, settings)
+            elif source == "remote_photos":
+                if not remote_images:
+                    raise RuntimeError("GPU photograph folder is missing.")
+                remote_run = _run_remote_photos(ssh, job_id, run_id, remote_images, remote_job, remote_run, settings)
             else:
                 _upload_and_segment(ssh, job_id, run_id, photos, remote_job, remote_run, settings)
                 _run_remote_predict(ssh, job_id, run_id, remote_run, settings)
-            _update_job(job_id, run_id, status="running", step="aggregating_plants", detail="Bringing results to this computer")
-            dest = incoming_dir(run_id)
-            if dest.exists():
-                shutil.rmtree(dest)
-            _sftp_download_prediction(ssh, remote_run, dest)
+            _finish_prediction_pull(ssh, job_id, run_id, remote_run, source)
         finally:
             ssh.close()
-        plants = assemble_run_report(run_id)
-        failed = [row for row in plants if row.get("status") == "failed"]
-        scored = [row for row in plants if row.get("status") == "scored"]
-        meta = read_run(run_id) or {}
-        meta.update(
-            {
-                "status": "ready",
-                "images": len(plants),
-                "scored": len(scored),
-                "failed": len(failed),
-                "finished_at": now_iso(),
-            }
-        )
-        write_run(run_id, meta)
-        _update_job(
-            job_id,
-            run_id,
-            status="ready",
-            step="ready",
-            detail=STEP_DETAIL["ready"],
-            plants=len(plants),
-            scored=len(scored),
-            failed=len(failed),
-        )
+        _mark_run_ready(job_id, run_id)
     except Exception as exc:  # noqa: BLE001
+        _mark_run_error(job_id, run_id, exc)
+
+
+def resume_running_prediction_jobs() -> None:
+    settings = load_settings()
+    if not settings.ssh_password or not settings.ssh_host:
+        return
+    seen: set[str] = set()
+    for job in _iter_stored_jobs():
+        if job.get("status") != "running":
+            continue
+        job_id = str(job.get("job_id") or "")
+        run_id = str(job.get("run_id") or "")
+        if not job_id or not run_id or job_id in seen:
+            continue
         meta = read_run(run_id) or {}
-        meta.update({"status": "error", "error": str(exc), "finished_at": now_iso()})
-        write_run(run_id, meta)
-        _update_job(job_id, run_id, status="error", step="error", detail=str(exc))
+        if not meta.get("remote_job"):
+            continue
+        seen.add(job_id)
+        PREDICTION_JOBS[job_id] = job
+        thread = threading.Thread(
+            target=_resume_prediction_job,
+            args=(job_id, run_id, settings),
+            daemon=True,
+        )
+        thread.start()
+
+
+def _iter_stored_jobs() -> list[dict[str, Any]]:
+    jobs: list[dict[str, Any]] = []
+    if JOB_STORE.exists():
+        for path in JOB_STORE.glob("*.json"):
+            try:
+                jobs.append(json.loads(path.read_text()))
+            except json.JSONDecodeError:
+                continue
+    if PREDICTIONS.exists():
+        for path in PREDICTIONS.glob("*/job.json"):
+            try:
+                jobs.append(json.loads(path.read_text()))
+            except json.JSONDecodeError:
+                continue
+    return jobs
+
+
+def _resume_prediction_job(job_id: str, run_id: str, settings: Settings) -> None:
+    try:
+        if (incoming_dir(run_id) / "plant_severity.csv").exists():
+            _mark_run_ready(job_id, run_id)
+            return
+        ssh = _ssh_client(settings)
+        try:
+            transport = ssh.get_transport()
+            if transport is not None:
+                transport.set_keepalive(30)
+            meta = read_run(run_id) or {}
+            remote_job = str(meta["remote_job"])
+            remote_run = str(meta.get("remote_run") or f"{remote_job}/run")
+            source = str(meta.get("source") or "remote_photos")
+            pid = int(meta.get("remote_pid") or 0) or None
+            _poll_remote_pipeline(ssh, job_id, run_id, remote_job, remote_run, pid)
+            _finish_prediction_pull(ssh, job_id, run_id, remote_run, source)
+        finally:
+            ssh.close()
+        _mark_run_ready(job_id, run_id)
+    except Exception as exc:  # noqa: BLE001
+        _mark_run_error(job_id, run_id, exc)
+
+
+def _finish_prediction_pull(ssh: Any, job_id: str, run_id: str, remote_run: str, source: str) -> None:
+    _update_job(
+        job_id,
+        run_id,
+        status="running",
+        step="aggregating_plants",
+        detail="Bringing scores to this computer. Photographs stay on the GPU."
+        if source == "remote_photos"
+        else "Bringing results to this computer",
+    )
+    dest = incoming_dir(run_id)
+    if dest.exists():
+        shutil.rmtree(dest)
+    names = CSV_DOWNLOAD_NAMES if source == "remote_photos" else DOWNLOAD_NAMES
+    _sftp_download_prediction(ssh, remote_run, dest, names=names)
+
+
+def _mark_run_ready(job_id: str, run_id: str) -> None:
+    plants = assemble_run_report(run_id)
+    failed = [row for row in plants if row.get("status") == "failed"]
+    scored = [row for row in plants if row.get("status") == "scored"]
+    meta = read_run(run_id) or {}
+    meta.update(
+        {
+            "status": "ready",
+            "images": len(plants),
+            "scored": len(scored),
+            "failed": len(failed),
+            "finished_at": now_iso(),
+        }
+    )
+    write_run(run_id, meta)
+    _update_job(
+        job_id,
+        run_id,
+        status="ready",
+        step="ready",
+        detail=STEP_DETAIL["ready"],
+        plants=len(plants),
+        scored=len(scored),
+        failed=len(failed),
+    )
+
+
+def _mark_run_error(job_id: str, run_id: str, exc: Exception) -> None:
+    meta = read_run(run_id) or {}
+    meta.update({"status": "error", "error": str(exc), "finished_at": now_iso()})
+    write_run(run_id, meta)
+    _update_job(job_id, run_id, status="error", step="error", detail=str(exc))
 
 
 def _upload_and_segment(
@@ -709,6 +902,227 @@ def _upload_tiled_run(
         copy_photos(run_id, originals)
 
 
+def _run_remote_photos(
+    ssh: Any,
+    job_id: str,
+    run_id: str,
+    remote_images: str,
+    remote_job: str,
+    remote_run: str,
+    settings: Settings,
+) -> str:
+    _update_job(job_id, run_id, status="running", step="waiting", detail=STEP_DETAIL["waiting"])
+    _ssh_exec(ssh, f"mkdir -p {_q(remote_job)} {_q(remote_run)}")
+    sftp = ssh.open_sftp()
+    try:
+        for script in ("segment_and_tile.py", "filter_tube_tiles.py"):
+            sftp.put(str(REPO / script), f"{remote_job}/{script}")
+    finally:
+        sftp.close()
+    predict_script = remote_predict_script(remote_run, settings, python=TRAINING_PYTHON)
+    _sftp_write_text(ssh, f"{remote_run}/run_predict.sh", predict_script)
+    pipeline = remote_inplace_script(remote_job, remote_run, remote_images, settings)
+    _sftp_write_text(ssh, f"{remote_job}/run_pipeline.sh", pipeline)
+    pid = _spawn_remote(ssh, f"bash {_q(remote_job + '/run_pipeline.sh')}")
+    meta = read_run(run_id) or {}
+    meta["remote_pid"] = pid
+    write_run(run_id, meta)
+    _poll_remote_pipeline(ssh, job_id, run_id, remote_job, remote_run, pid)
+    return remote_run
+
+
+def remote_inplace_script(remote_job: str, remote_run: str, remote_images: str, settings: Settings) -> str:
+    gpu = cuda_device_index(settings.device)
+    return f"""#!/bin/bash
+set -euo pipefail
+JOB={_q(remote_job)}
+RUN={_q(remote_run)}
+IMAGES={_q(remote_images)}
+LOG="$JOB/pipeline.log"
+SEG={_q(settings.remote_python)}
+TRAIN={_q(TRAINING_PYTHON)}
+GPU={gpu}
+mkdir -p "$RUN"
+exec > >(tee -a "$LOG") 2>&1
+progress() {{
+  "$SEG" - "$1" "$2" <<'PY'
+import json, sys
+from pathlib import Path
+Path({remote_job!r} + "/progress.json").write_text(
+    json.dumps({{"step": sys.argv[1], "detail": sys.argv[2], "done": False}}) + "\\n"
+)
+PY
+}}
+fail() {{
+  echo "$1" | tee "$JOB/FAILED"
+  progress error "$1"
+  exit 1
+}}
+avail=$(df -Pm "$JOB" | awk 'NR==2{{print $4}}')
+if [ "${{avail:-0}}" -lt 8000 ]; then
+  fail "The GPU disk is too full to score this folder (${{avail}} MB free)."
+fi
+progress waiting "Waiting for a free GPU"
+while true; do
+  free=$(nvidia-smi --id="$GPU" --query-gpu=memory.free --format=csv,noheader,nounits | head -1 | tr -d ' ')
+  if [ "${{free:-0}}" -gt 8000 ]; then
+    echo "GPU$GPU free ${{free}}MiB"
+    break
+  fi
+  echo "WAITING_GPU gpu=$GPU free=${{free}}MiB"
+  progress waiting "Another process is using GPU $GPU (${{free}} MiB free). Waiting."
+  sleep 30
+done
+export CUDA_VISIBLE_DEVICES="$GPU"
+progress segmenting "Finding and cutting out each plant"
+"$SEG" "$JOB/segment_and_tile.py" \\
+  --project {_q(settings.remote_project)} \\
+  --images "$IMAGES" \\
+  --output "$RUN" \\
+  --fold {settings.fold} \\
+  --device {_q(settings.device)} \\
+  --skip-previews --resume || fail "Plant cut failed. See pipeline.log."
+progress filtering "Keeping leaf tiles"
+"$SEG" "$JOB/filter_tube_tiles.py" \\
+  --images "$IMAGES" \\
+  --run "$RUN" \\
+  --skip-previews || fail "Leaf filter failed. See pipeline.log."
+progress scoring_tiles "Measuring visible damage"
+bash "$RUN/run_predict.sh" || fail "Scoring failed. See predict.log."
+progress ready "Predictions are ready"
+echo DONE > "$JOB/DONE"
+"""
+
+
+def _spawn_remote(ssh: Any, command: str) -> int:
+    """Start `command` detached on the GPU and return its PID."""
+    transport = ssh.get_transport()
+    if transport is None:
+        raise RuntimeError("Lost the GPU connection before the job started.")
+    chan = transport.open_session()
+    chan.exec_command(f"nohup {command} >/dev/null 2>&1 & echo $!")
+    out = b""
+    while True:
+        if chan.recv_ready():
+            out += chan.recv(4096)
+        if chan.exit_status_ready():
+            while chan.recv_ready():
+                out += chan.recv(4096)
+            break
+    if chan.recv_exit_status() != 0:
+        raise RuntimeError("Could not start the GPU scoring job.")
+    text = out.decode("utf-8", errors="replace").strip()
+    pid = text.splitlines()[-1].strip() if text else ""
+    if not pid.isdigit():
+        raise RuntimeError("The GPU scoring job did not start.")
+    return int(pid)
+
+
+STALL_SECONDS = 2 * 60 * 60
+
+
+def _poll_remote_pipeline(
+    ssh: Any,
+    job_id: str,
+    run_id: str,
+    remote_job: str,
+    remote_run: str,
+    pid: int | None = None,
+) -> None:
+    while True:
+        status = _remote_pipeline_status(ssh, remote_job, remote_run, pid)
+        _update_job(
+            job_id,
+            run_id,
+            status="running",
+            step=status["step"],
+            detail=status["detail"],
+        )
+        if status["failed"]:
+            raise RuntimeError(status["detail"])
+        if status["done"]:
+            return
+        time.sleep(15)
+
+
+def _remote_pipeline_status(
+    ssh: Any,
+    remote_job: str,
+    remote_run: str,
+    pid: int | None = None,
+) -> dict[str, Any]:
+    """Read progress files on the GPU. Fails the job when its process is gone.
+
+    With a known PID, liveness is authoritative: no DONE, no FAILED, no process
+    means the pipeline died (reboot, kill, OOM). Without a PID (jobs started by
+    an older build) a stall of STALL_SECONDS with no file change fails instead.
+    """
+    command = (
+        f"{_q(TRAINING_PYTHON)} - <<'PY'\n"
+        "import json, os, time\n"
+        "from pathlib import Path\n"
+        f"job = Path({remote_job!r})\n"
+        f"run = Path({remote_run!r})\n"
+        f"pid = {int(pid or 0)}\n"
+        f"stall = {STALL_SECONDS}\n"
+        "payload = {'step': 'waiting', 'detail': 'Starting on the GPU', 'done': False, 'failed': False}\n"
+        "failed = job / 'FAILED'\n"
+        "if failed.exists():\n"
+        "    payload.update(step='error', detail=failed.read_text().strip() or 'GPU job failed', failed=True)\n"
+        "    print(json.dumps(payload))\n"
+        "    raise SystemExit\n"
+        "progress = job / 'progress.json'\n"
+        "if progress.exists():\n"
+        "    try:\n"
+        "        payload.update(json.loads(progress.read_text()))\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "seg = run / 'segment_progress.json'\n"
+        "if seg.exists() and payload.get('step') in {None, 'waiting', 'segmenting'}:\n"
+        "    try:\n"
+        "        info = json.loads(seg.read_text())\n"
+        "        payload['step'] = 'segmenting'\n"
+        "        payload['detail'] = f\"Cut {info.get('done', 0)} of {info.get('total', '?')} plants\"\n"
+        "        if info.get('image'):\n"
+        "            payload['detail'] += f\" ({info['image']})\"\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "if (run / 'tiles_foliage.csv').exists() and payload.get('step') == 'segmenting':\n"
+        "    payload.update(step='filtering', detail='Keeping leaf tiles')\n"
+        "if (run / 'tile_predictions.csv').exists():\n"
+        "    payload.update(step='aggregating_plants', detail='Calculating whole-plant severity')\n"
+        "if (job / 'DONE').exists() and (run / 'plant_severity.csv').exists():\n"
+        "    payload.update(step='aggregating_plants', detail='Scores are ready', done=True)\n"
+        "if not payload['done']:\n"
+        "    if pid:\n"
+        "        try:\n"
+        "            os.kill(pid, 0)\n"
+        "            alive = True\n"
+        "        except ProcessLookupError:\n"
+        "            alive = False\n"
+        "        except PermissionError:\n"
+        "            alive = True\n"
+        "        if not alive:\n"
+        "            payload.update(step='error', failed=True, detail=\n"
+        "                f'The GPU job stopped before it finished. See {job}/pipeline.log.')\n"
+        "    else:\n"
+        "        files = [job / 'progress.json', job / 'pipeline.log', seg, run / 'predict.log',\n"
+        "                 run / 'tiles.csv', run / 'tiles_foliage.csv', run / 'tile_predictions.csv']\n"
+        "        stamps = [p.stat().st_mtime for p in files if p.exists()]\n"
+        "        newest = max(stamps) if stamps else job.stat().st_mtime\n"
+        "        if time.time() - newest > stall:\n"
+        "            payload.update(step='error', failed=True, detail=\n"
+        "                f'The GPU job has written nothing for {stall // 3600} hours. See {job}/pipeline.log.')\n"
+        "print(json.dumps(payload))\n"
+        "PY"
+    )
+    raw = _ssh_exec(ssh, command).strip().splitlines()
+    try:
+        return json.loads(raw[-1])
+    except (IndexError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Could not read GPU job status: {raw[-3:]}") from exc
+
+
 def _run_remote_predict(ssh: Any, job_id: str, run_id: str, remote_run: str, settings: Settings) -> None:
     keep_count = _remote_keep_count(ssh, settings, f"{remote_run}/tiles_foliage.csv")
     if keep_count == 0:
@@ -752,8 +1166,8 @@ def _run_repro_remote(ssh: Any, job_id: str, run_id: str, remote_job: str, setti
     return remote_run
 
 
-def remote_predict_script(remote_run: str, settings: Settings) -> str:
-    python = settings.remote_python
+def remote_predict_script(remote_run: str, settings: Settings, python: str | None = None) -> str:
+    python = python or TRAINING_PYTHON
     device = cuda_device_index(settings.device)
     return f"""#!/bin/bash
 set -euo pipefail
@@ -803,6 +1217,7 @@ cd "$ROOT"
   --output "$RUN/tile_predictions.csv" >> "$LOG" 2>&1
 "$PYTHON" - <<'PY' >> "$LOG" 2>&1
 from pathlib import Path
+import shutil
 import pandas as pd
 root = Path({REMOTE_TRAINING!r})
 run = Path({remote_run!r})
@@ -810,7 +1225,29 @@ splits = pd.read_csv(root / "training/artifacts/splits.csv")
 tiles = pd.read_csv(root / "training_tiles.csv")
 test = tiles[tiles.image.isin(splits.loc[splits.split.eq("test"), "image"])]
 test.to_csv(run / "test_tiles.csv", index=False)
-print(f"Wrote {{len(test)}} locked final-test tiles")
+keep = test.copy()
+keep["decision"] = "keep"
+keep.to_csv(run / "tiles_foliage.csv", index=False)
+tiles_dir = run / "foliage_tiles"
+tiles_dir.mkdir(exist_ok=True)
+copied = 0
+for tile in test.tile.dropna().unique():
+    src = root / "foliage_tiles" / Path(str(tile)).name
+    if src.exists():
+        shutil.copy2(src, tiles_dir / src.name)
+        copied += 1
+crops = run / "plant_crops"
+crops.mkdir(exist_ok=True)
+for image in test.image.dropna().unique():
+    name = Path(str(image)).stem + "_plant.jpg"
+    src = root / "plant_crops" / name
+    if src.exists():
+        shutil.copy2(src, crops / name)
+images_csv = root / "images.csv"
+if images_csv.exists():
+    images = pd.read_csv(images_csv)
+    images[images.image.isin(test.image)].to_csv(run / "images.csv", index=False)
+print(f"Wrote {{len(test)}} locked final-test tiles and copied {{copied}} photographs")
 PY
 "$PYTHON" -m training.aggregate_plants \\
   --dataset-root "$ROOT" \\
@@ -822,6 +1259,39 @@ PY
   --model {_q(PLANT_MODEL)} \\
   --output "$RUN/plant_severity.csv" >> "$LOG" 2>&1
 cp {_q(FINAL_TEST_DEPLOYMENT)} "$RUN/deployment_predictions.csv"
+"$PYTHON" - <<'PY' >> "$LOG" 2>&1
+from pathlib import Path
+import pandas as pd
+import shutil
+root = Path({REMOTE_TRAINING!r})
+run = Path({remote_run!r})
+test = pd.read_csv(run / "test_tiles.csv")
+keep = test.copy()
+keep["decision"] = "keep"
+keep.to_csv(run / "tiles_foliage.csv", index=False)
+tiles_dest = run / "foliage_tiles"
+tiles_dest.mkdir(exist_ok=True)
+copied = 0
+for tile in test.tile.dropna().unique():
+    src = root / "foliage_tiles" / Path(str(tile)).name
+    if src.is_file():
+        shutil.copy2(src, tiles_dest / src.name)
+        copied += 1
+crops_dest = run / "plant_crops"
+crops_dest.mkdir(exist_ok=True)
+crop_count = 0
+for image in test.image.dropna().unique():
+    name = Path(str(image)).stem + "_plant.jpg"
+    src = root / "plant_crops" / name
+    if src.is_file():
+        shutil.copy2(src, crops_dest / name)
+        crop_count += 1
+images_src = root / "images.csv"
+if images_src.is_file():
+    images = pd.read_csv(images_src)
+    images[images.image.isin(test.image)].to_csv(run / "images.csv", index=False)
+print(f"Copied {{copied}} tiles and {{crop_count}} plant crops for the UI")
+PY
 """
 
 
@@ -854,11 +1324,16 @@ def _sftp_write_text(ssh: Any, remote: str, text: str) -> None:
         sftp.close()
 
 
-def _sftp_download_prediction(ssh: Any, remote_run: str, dest: Path) -> None:
+def _sftp_download_prediction(
+    ssh: Any,
+    remote_run: str,
+    dest: Path,
+    names: tuple[str, ...] = DOWNLOAD_NAMES,
+) -> None:
     dest.mkdir(parents=True, exist_ok=True)
-    allowed = set(DOWNLOAD_NAMES)
+    allowed = set(names)
     remote = remote_run.rstrip("/")
-    listed = " ".join(DOWNLOAD_NAMES)
+    listed = " ".join(names)
     script = (
         "#!/bin/bash\n"
         "set -e\n"
@@ -954,8 +1429,12 @@ def plant_detail(run_id: str, image: str, high_frac: float = 0.20, mid_frac: flo
     for tile in evidence:
         name = str(tile.get("tile") or "")
         tile["url"] = f"/media/predictions/{encoded_run}/tile/{quote(name, safe='.')}" if name else None
-    has_original = original_path(run_id, image) is not None
-    has_crop = crop_path(run_id, image) is not None
+    remote_media = uses_remote_media(run_id)
+    has_original = original_path(run_id, image) is not None or remote_media
+    has_crop = crop_path(run_id, image) is not None or remote_media
+    has_tile_images = remote_media or any(
+        tile_path(run_id, str(tile.get("tile") or "")) is not None for tile in tiles[:12]
+    )
     return {
         "run_id": run_id,
         "plant": plant,
@@ -965,8 +1444,10 @@ def plant_detail(run_id: str, image: str, high_frac: float = 0.20, mid_frac: flo
         "media": {
             "has_original": has_original,
             "has_crop": has_crop,
+            "has_tile_images": has_tile_images,
             "original": f"/media/predictions/{encoded_run}/original/{encoded_image}" if has_original else None,
             "crop": f"/media/predictions/{encoded_run}/crop/{encoded_image}" if has_crop else None,
+            "source": "remote" if remote_media else "local",
         },
     }
 
@@ -977,6 +1458,115 @@ def compare_run_to_deployment(run_id: str) -> dict[str, Any]:
         _read_csv(incoming / "plant_severity.csv"),
         _read_csv(incoming / "deployment_predictions.csv"),
     )
+
+
+def uses_remote_media(run_id: str) -> bool:
+    meta = read_run(run_id) or {}
+    return meta.get("media_source") == "remote" and bool(meta.get("remote_run") or meta.get("remote_images"))
+
+
+def remote_media_path(run_id: str, kind: str, name: str) -> str | None:
+    meta = read_run(run_id) or {}
+    leaf = _safe_leaf_name(name)
+    if kind == "original":
+        root = str(meta.get("remote_images") or "")
+        return f"{root.rstrip('/')}/{leaf}" if root else None
+    remote_run = str(meta.get("remote_run") or "").rstrip("/")
+    if not remote_run:
+        return None
+    if kind == "crop":
+        return f"{remote_run}/plant_crops/{crop_filename(leaf)}"
+    if kind == "tile":
+        return f"{remote_run}/foliage_tiles/{leaf}"
+    raise ValueError(f"Unknown prediction media kind: {kind}")
+
+
+def resolve_prediction_media(run_id: str, kind: str, name: str) -> tuple[str, Path | str]:
+    if kind == "original":
+        local = original_path(run_id, name)
+    elif kind == "crop":
+        local = crop_path(run_id, name)
+    elif kind == "tile":
+        local = tile_path(run_id, name)
+    else:
+        raise ValueError(f"Unknown prediction media kind: {kind}")
+    if local is not None:
+        return "local", local
+    remote = remote_media_path(run_id, kind, name)
+    if remote:
+        return "remote", remote
+    raise FileNotFoundError(name)
+
+
+_MEDIA_LOCK = threading.Lock()
+_MEDIA_SSH: dict[str, Any] = {}
+
+
+def _media_ssh(settings: Settings, fresh: bool = False) -> Any:
+    """One SSH login per GPU host, reused by every media request.
+
+    Each request still opens its own SFTP channel on that transport, so
+    parallel thumbnail loads do not serialize on one channel and the
+    expensive part (password login) happens once instead of per image.
+    """
+    key = f"{settings.ssh_user}@{settings.ssh_host}"
+    with _MEDIA_LOCK:
+        client = _MEDIA_SSH.get(key)
+        transport = client.get_transport() if client is not None else None
+        if fresh or transport is None or not transport.is_active():
+            if client is not None:
+                client.close()
+            client = _ssh_client(settings)
+            live = client.get_transport()
+            if live is not None:
+                live.set_keepalive(30)
+            _MEDIA_SSH[key] = client
+        return client
+
+
+def _media_sftp(settings: Settings) -> Any:
+    try:
+        return _media_ssh(settings).open_sftp()
+    except Exception:  # noqa: BLE001
+        return _media_ssh(settings, fresh=True).open_sftp()
+
+
+def iter_remote_file(remote_path: str) -> Iterator[bytes]:
+    """Stream a GPU file. Raises FileNotFoundError before any byte is sent."""
+    settings = load_settings()
+    _require_gpu(settings)
+    sftp = _media_sftp(settings)
+    try:
+        size = int(sftp.stat(remote_path).st_size or 0)
+        handle = sftp.file(remote_path, "rb")
+    except FileNotFoundError as exc:
+        sftp.close()
+        raise FileNotFoundError(remote_path) from exc
+    except Exception:
+        sftp.close()
+        raise
+    if size:
+        handle.prefetch(size)
+
+    def stream() -> Iterator[bytes]:
+        try:
+            while True:
+                chunk = handle.read(256 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            handle.close()
+            sftp.close()
+
+    return stream()
+
+
+def media_content_type(name: str) -> str:
+    suffix = Path(name).suffix.lower()
+    if suffix == ".png":
+        return "image/png"
+    return "image/jpeg"
 
 
 def original_path(run_id: str, image: str) -> Path | None:

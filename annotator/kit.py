@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import shutil
-from pathlib import Path
 
 from annotator.config import DATA, SETTINGS_PATH
 from annotator.db import create_batch, init_db, set_batch_status
 from annotator.pipeline import ingest_run
-from annotator.sessions import set_last_session, write_meta
+from annotator.sessions import write_meta
 
 CACHE = DATA / "cache" / "existing_run"
 PHOTOS = DATA / "photos"
@@ -54,9 +53,3 @@ def reset_clean_kit() -> tuple[int, int]:
             "source": "kit",
         },
     )
-    set_last_session("session-1", batch_id)
-    return batch_id, count
-
-
-def kit_tile_dir() -> Path:
-    return CACHE / "foliage_tiles"

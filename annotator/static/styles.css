@@ -1016,7 +1016,7 @@ button.ghost:disabled,
 
 .predict-upload {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--spacing-16);
   margin: 0 0 var(--spacing-24);
 }
@@ -1124,7 +1124,38 @@ button.ghost:disabled,
 }
 
 .chip.low {
-  color: var(--color-graphite);
+  background: var(--color-pure-white);
+  color: var(--color-charcoal);
+  box-shadow: inset 0 0 0 1px var(--color-ash);
+}
+
+.chip.review {
+  background: var(--color-obsidian);
+  color: var(--color-pure-white);
+}
+
+.predict-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.predict-open {
+  border: 1px solid var(--color-obsidian);
+  background: var(--color-pure-white);
+  color: var(--color-obsidian);
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-geist-sans);
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.predict-open:hover {
+  background: var(--color-obsidian);
+  color: var(--color-pure-white);
 }
 
 .warning {

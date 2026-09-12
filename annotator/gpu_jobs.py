@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from annotator.config import REPO, Settings, annotator_remote_root, load_settings
-from annotator.export_merge import EXPORT_FIELDS, decide_export_action, merged_rows
+from annotator.export_merge import EXPORT_FIELDS, decide_export_action
 from annotator.pipeline import (
     IMAGE_SUFFIXES,
     JOBS,
@@ -219,15 +219,21 @@ def export_batch_to_gpu(batch_id: int) -> dict[str, Any]:
                 "added": len(local_rows),
             }
         if decision["action"] == "append":
-            extras = decision["extras"]
-            merged = merged_rows(decision.get("remote_rows") or [], extras)
-            _sftp_write_csv(ssh, decision["remote_path"], merged)
+            added = len(decision["added"])
+            updated = len(decision["updated"])
+            kept = len(decision["kept"])
+            _sftp_write_csv(ssh, decision["remote_path"], decision["rows"])
             return {
                 "action": "append",
-                "detail": f"Added {len(extras)} new rows. Existing GPU marks were left as they are.",
+                "detail": (
+                    f"Added {added} new rows and updated {updated} with newer marks. "
+                    f"{kept} GPU marks were as new or newer and were kept."
+                ),
                 "remote_path": decision["remote_path"],
                 "local_path": str(local_path),
-                "added": len(extras),
+                "added": added,
+                "updated": updated,
+                "kept": kept,
             }
         from annotator.db import get_batch
 

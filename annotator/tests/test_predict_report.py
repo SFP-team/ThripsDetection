@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,9 +9,13 @@ from annotator.predict_jobs import (
     inspect_raw_folder,
     inspect_tiled_folder,
     list_prediction_runs,
+    plant_detail,
+    remote_media_path,
+    resolve_prediction_media,
     start_prediction_from_tiled_upload,
     start_prediction_from_upload,
     unique_basenames,
+    uses_remote_media,
 )
 from annotator.predict_report import (
     EXPORT_FIELDS,
@@ -222,6 +227,77 @@ class SourceNameTests(unittest.TestCase):
                 self.assertEqual(ids, ["20260826-real"])
             finally:
                 predict_jobs.PREDICTIONS = original
+
+
+class RemoteMediaTests(unittest.TestCase):
+    def test_remote_paths_stay_on_the_server(self):
+        from annotator import predict_jobs
+
+        with tempfile.TemporaryDirectory() as raw:
+            original = predict_jobs.PREDICTIONS
+            predict_jobs.PREDICTIONS = Path(raw)
+            try:
+                run = Path(raw) / "w25"
+                run.mkdir()
+                (run / "run.json").write_text(
+                    json.dumps(
+                        {
+                            "run_id": "w25",
+                            "media_source": "remote",
+                            "remote_images": "/home/fpt/ThripsDetection/RoverImages",
+                            "remote_run": "/home/fpt/ThripsDetection/prediction_runs/job/run",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                incoming = run / "incoming"
+                incoming.mkdir()
+                (incoming / "images.csv").write_text(
+                    "image,box_x0,box_y0,box_w,box_h\nW25010101R.jpg,10,20,100,200\n",
+                    encoding="utf-8",
+                )
+                (incoming / "plant_severity.csv").write_text(
+                    "image,predicted_expected,predicted_score,confidence,needs_review,"
+                    "p_score_1,p_score_2,p_score_3,p_score_4,p_score_5\n"
+                    "W25010101R.jpg,2.2,2,0.7,false,0.1,0.6,0.2,0.05,0.05\n",
+                    encoding="utf-8",
+                )
+                (incoming / "tiles_foliage.csv").write_text(
+                    "image,tile,x,y,width,height,decision\n"
+                    "W25010101R.jpg,W25010101R_x10_y20.jpg,10,20,512,512,keep\n",
+                    encoding="utf-8",
+                )
+                self.assertTrue(uses_remote_media("w25"))
+                self.assertEqual(
+                    remote_media_path("w25", "original", "W25010101R.jpg"),
+                    "/home/fpt/ThripsDetection/RoverImages/W25010101R.jpg",
+                )
+                self.assertEqual(
+                    remote_media_path("w25", "crop", "W25010101R.jpg"),
+                    "/home/fpt/ThripsDetection/prediction_runs/job/run/plant_crops/W25010101R_plant.jpg",
+                )
+                source, location = resolve_prediction_media("w25", "crop", "W25010101R.jpg")
+                self.assertEqual(source, "remote")
+                self.assertEqual(location, remote_media_path("w25", "crop", "W25010101R.jpg"))
+                detail = plant_detail("w25", "W25010101R.jpg")
+                self.assertTrue(detail["media"]["has_crop"])
+                self.assertTrue(detail["media"]["has_original"])
+                self.assertTrue(detail["media"]["has_tile_images"])
+                self.assertEqual(detail["media"]["source"], "remote")
+            finally:
+                predict_jobs.PREDICTIONS = original
+
+    def test_remote_dir_rejects_relative_paths(self):
+        from annotator.predict_jobs import _safe_remote_dir
+
+        with self.assertRaises(ValueError):
+            _safe_remote_dir("RoverImages")
+        with self.assertRaises(ValueError):
+            _safe_remote_dir("/home/fpt/../etc")
+        self.assertEqual(
+            _safe_remote_dir("/home/fpt/ThripsDetection/RoverImages"),
+            "/home/fpt/ThripsDetection/RoverImages",
+        )
 
 
 class OverlayRectTests(unittest.TestCase):

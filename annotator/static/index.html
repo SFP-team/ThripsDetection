@@ -402,6 +402,16 @@
             Drop a tiled folder here, or click to choose one
           </label>
         </form>
+
+        <form id="form-predict-remote" class="panel home-card">
+          <p class="panel-kicker">Already on the GPU</p>
+          <h2>Score in place</h2>
+          <p id="predict-remote-hint">Photographs stay on the server. This computer only pulls scores. Open a plant to load that photograph.</p>
+          <label>Folder path on the GPU
+            <input id="predict-remote-path" placeholder="/home/fpt/ThripsDetection/RoverImages">
+          </label>
+          <button type="submit" class="primary" id="predict-remote-path-btn">Score this GPU folder</button>
+        </form>
       </div>
       </div>
 
@@ -416,6 +426,7 @@
         <h2 id="predict-progress-title">Sending photographs</h2>
         <p id="predict-progress-detail">Starting…</p>
         <ol class="steps" id="predict-steps">
+          <li data-step="waiting">Waiting for a free GPU</li>
           <li data-step="sending">Sending photographs to the GPU</li>
           <li data-step="segmenting">Finding and cutting out each plant</li>
           <li data-step="filtering">Keeping leaf tiles</li>
@@ -430,7 +441,7 @@
           <div>
             <p class="panel-kicker" id="predict-result-kicker">Ranking</p>
             <h2 id="predict-result-title">Most damaged first</h2>
-            <p class="lead predict-note">Rank and high / medium / low are prioritization in this upload, not a treatment rate. The 1 to 5 score is a rounded rank, not a scout grade.</p>
+            <p class="lead predict-note">Open any plant to see the photograph. Rank and high / medium / low are prioritization in this upload, not a treatment rate. The 1 to 5 score is a rounded rank, not a scout grade.</p>
           </div>
           <div class="predict-exports">
             <button type="button" class="ghost" id="predict-new">New prediction</button>
@@ -458,7 +469,7 @@
                 <th>Broad severity</th>
                 <th>Confidence</th>
                 <th>Priority</th>
-                <th>Review</th>
+                <th>Open</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -490,14 +501,14 @@
             </div>
             <p class="overlay-status" id="predict-overlay-status" hidden>Rebuilding the plant from its leaf tiles…</p>
             <p class="overlay-legend">
-              <span class="swatch healthy"></span> Healthy new growth
               <span class="swatch mild"></span> Mild
               <span class="swatch severe"></span> Severe
-              Each outlined square is a scored new-growth tile. The bar color is the call. Click a square for the numbers.
+              Color sits on leaves. Yellow is mild. Red is severe. Healthy leaves stay unmarked. Click a spot for the numbers.
             </p>
           </figure>
           <aside class="predict-scores" id="predict-scores"></aside>
         </div>
+        <p class="warning" id="predict-media-missing" hidden></p>
         <div class="tile-prob" id="predict-tile-prob" hidden></div>
         <div id="predict-evidence-block">
           <p class="panel-kicker">Highest-damage distinct tiles</p>
